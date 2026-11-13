@@ -40,6 +40,7 @@
   .qrow span { flex:1; }
   .mini { width:auto; margin:0; padding:6px 10px; font-size:13px; font-weight:600; border-radius:8px; background:#e8edf7; color:var(--navy); }
   #queue > .mini { margin-top:10px; }
+  button.danger { background:#fdecec; color:#b3261e; }
   .chip { display:inline-block; margin:4px 6px 0 0; padding:6px 12px; border-radius:16px; border:1px solid var(--line); background:#eef2fa; color:var(--navy); font-size:15px; font-weight:700; cursor:pointer; width:auto; }
   .help { font-size:13px; color:#4a5266; line-height:1.65; }
 </style>
@@ -82,6 +83,7 @@
     <button type="button" id="dl">연락처 파일(.vcf) 받기</button>
     <button type="button" class="alt" id="share" hidden>공유로 바로 열기</button>
     <button type="button" class="alt" id="reset">이 명함 담고 다음 명함 ▶</button>
+    <button type="button" class="alt danger" id="discard">이 명함 지우기</button>
     <div id="queue" style="display:none"></div>
     <div class="status" id="msg"></div>
 
@@ -446,6 +448,18 @@ if (typeof document !== 'undefined') {
     renderQueue();
     say('담았습니다. 다음 명함을 찍어 주세요. 다 담았으면 아래 \'연락처 파일 받기\'를 누르세요.');
     say(queue.length ? queue.length + '명이 담겨 있습니다.' : '', 'msg');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  // 지금 보이는 명함만 지움 (담아 둔 목록은 그대로)
+  el('discard').addEventListener('click', () => {
+    const cur = getCard();
+    const filled = IDS.some(k => cur[k]) || el('preview').style.display === 'block';
+    if (filled && !confirm('지금 명함의 입력 내용과 사진을 지울까요? (담아 둔 명함은 그대로 남습니다)')) return;
+    IDS.forEach(k => el(k).value = ''); el('raw').value = ''; el('alts').innerHTML = '';
+    el('preview').style.display = 'none'; el('bar').style.display = 'none';
+    el('cam').value = ''; el('gal').value = '';
+    renderQueue();
+    say('지웠습니다. 다음 명함을 찍어 주세요.'); say('', 'msg');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   IDS.forEach(k => el(k).addEventListener('input', renderQueue));
