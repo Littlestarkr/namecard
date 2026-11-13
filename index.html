@@ -200,8 +200,6 @@ function parseCard(text) {
         if (!out.org && orgRe.test(p) && !deptRe.test(p)) out.org = p;
         else if (!out.dept && deptRe.test(p) && !titleRe.test(p)) out.dept = p;
         else if (!out.title && titleRe.test(p)) out.title = p;
-        else if (!out.dept && (p.match(/[가-힣]/g) || []).length >= 3) out.dept = p;
-        else if (!out.title && (p.match(/[가-힣]/g) || []).length >= 3) out.title = p;
       });
       used.add(i);
     }
@@ -300,6 +298,7 @@ function mergeLines(passes) {
     if ((l.confidence == null ? 100 : l.confidence) < 45) return;
     const hang = (t.match(/[가-힣]/g) || []).length, alnum = (t.match(/[A-Za-z0-9]/g) || []).length;
     if (!(hang >= 2 || alnum >= 6 || (hang >= 1 && alnum >= 3))) return;
+    if (/Leader|Energy|Innovation|Slogan|KOGAS,/i.test(t)) return;
     const n = norm(t);
     if (seen.some(x => x === n || x.includes(n) || (n.includes(x) && n.length - x.length < 2))) return;
     seen.push(n); out.push(t);
@@ -329,6 +328,10 @@ function altNames(name) {
     const jong = code % 28;
     (swaps[jong] || []).forEach(j => out.push(name.slice(0, i) + String.fromCharCode(0xAC00 + code - jong + j) + name.slice(i + 1)));
   }
+  const cleanField = v => { if (!v) return ''; const h = (v.match(/[가-힣]/g) || []).length, e = (v.match(/[A-Za-z]/g) || []).length, o = (v.match(/[^가-힣A-Za-z0-9\s&().-]/g) || []).length; return (h >= 2 && e <= h && o <= 1) ? v : ''; };
+  if (out.dept && !deptRe.test(out.dept)) out.dept = '';
+  out.dept = cleanField(out.dept);
+  if (out.title && !titleRe.test(out.title)) out.title = '';
   return out;
 }
 /* ===== PARSER_END ===== */
