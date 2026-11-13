@@ -168,9 +168,7 @@ function parseCard(text) {
   // 이름+직책이 한 줄에 붙은 경우('황의상 부장')
   lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
-    const t = l.replace(/\s/g, '');
-    if (!/^[가-힣]+$/.test(t)) return;
-    const nt = splitNameTitle(t);
+    const nt = looseName(l);
     if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
   });
 
@@ -187,8 +185,8 @@ function parseCard(text) {
         if (!out.org && orgRe.test(p) && !deptRe.test(p)) out.org = p;
         else if (!out.dept && deptRe.test(p) && !titleRe.test(p)) out.dept = p;
         else if (!out.title && titleRe.test(p)) out.title = p;
-        else if (!out.dept) out.dept = p;
-        else if (!out.title) out.title = p;
+        else if (!out.dept && (p.match(/[가-힣]/g) || []).length >= 3) out.dept = p;
+        else if (!out.title && (p.match(/[가-힣]/g) || []).length >= 3) out.title = p;
       });
       used.add(i);
     }
@@ -203,8 +201,9 @@ function parseCard(text) {
   // 이름: 한글 2~4자 단독 줄 → 영문 2~3단어 줄
   lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
-    const t = l.replace(/\s/g, '');
-    if (/^[가-힣]{2,4}$/.test(t)) { nameLine = t; used.add(i); }
+    const nt = looseName(l);
+    if (nt && !nt.title) { nameLine = nt.name; used.add(i); }
+    else if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
   });
   if (!nameLine) lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
@@ -238,6 +237,59 @@ function orgFromDomain(email) {
   const parts = d.split('.');
   for (let i = 0; i < parts.length - 1; i++) { const k = parts.slice(i).join('.'); if (ORG_DOMAINS[k]) return ORG_DOMAINS[k]; }
   return '';
+}
+
+// ---- 인식 결과 정리용 도우미 ----
+// 이름 줄 판별: 한글 외 찌꺼기가 3자 이하이고 숫자 덩어리가 없으면, 한글만 뽑아 이름(+직책)으로 본다
+function looseName(l) {
+  if (!l) return null;
+  const non = l.replace(/[가-힣\s]/g, '');
+  if (non.length > 3 || /\d{2}/.test(l)) return null;
+  const hangul = l.replace(/[^가-힣]/g, '');
+  if (hangul.length < 2 || hangul.length > 8) return null;
+  return splitNameTitle(hangul);
+}
+// 글자를 자모로 쪼개 비슷한 정도를 비교 (작은 글씨 '부장'이 '보장'으로 읽힌 경우 등)
+function jamoOf(str) {
+  const out = [];
+  for (const ch of str) {
+    const c = ch.charCodeAt(0) - 0xAC00;
+    if (c >= 0 && c <= 11171) { out.push(Math.floor(c / 588)); out.push(100 + Math.floor((c % 588) / 28)); if (c % 28) out.push(200 + (c % 28)); }
+    else out.push(1000 + ch.charCodeAt(0));
+  }
+  return out;
+}
+function jamoDist(a, b) {
+  const x = jamoOf(a), y = jamoOf(b), d = Array.from({ length: x.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= y.length; j++) d[0][j] = j;
+  for (let i = 1; i <= x.length; i++) for (let j = 1; j <= y.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+  return d[x.length][y.length];
+}
+const TITLE_LIST = TITLE_WORDS.split('|');
+// 직책으로 보이는 글자를 가장 가까운 직책 단어로 바로잡는다. 너무 다르면 ''.
+function fuzzyTitle(raw) {
+  const t = (raw || '').replace(/[^가-힣]/g, '');
+  if (t.length < 2 || t.length > 6) return '';
+  let best = '', bd = 99;
+  for (const w of TITLE_LIST) { const d = jamoDist(t, w); if (d < bd || (d === bd && w.length > best.length)) { bd = d; best = w; } }
+  return bd <= 1 ? best : '';
+}
+// 여러 번 읽은 줄들을 합친다. 신뢰도 낮은 줄·뜻 없는 찌꺼기 줄은 버리고, 앞 순서(정확한 방식)를 우선한다.
+// passes: [[{text, confidence}, ...], ...]
+function mergeLines(passes) {
+  const norm = s => s.replace(/\s+/g, '').toLowerCase();
+  const seen = [], out = [];
+  passes.forEach(pass => (pass || []).forEach(l => {
+    const t = (l.text || '').trim(); if (!t) return;
+    if ((l.confidence == null ? 100 : l.confidence) < 45) return;
+    const hang = (t.match(/[가-힣]/g) || []).length, alnum = (t.match(/[A-Za-z0-9]/g) || []).length;
+    if (!(hang >= 2 || alnum >= 6 || (hang >= 1 && alnum >= 3))) return;
+    const n = norm(t);
+    if (seen.some(x => x === n || x.includes(n) || (n.includes(x) && n.length - x.length < 2))) return;
+    seen.push(n); out.push(t);
+  }));
+  return out.join('\n');
 }
 
 // 회사명 보정: 로고 글자(IBK 등)가 깨져 읽힌 경우 + 자주 쓰는 기관명 사전
@@ -498,47 +550,44 @@ if (typeof document !== 'undefined') {
     return best.deg;
   }
 
-  // 여러 번 읽은 결과 합치기 (이미 있는 줄은 중복 제외)
-  function mergeTexts(texts) {
-    const norm = s => s.replace(/\s+/g, '').toLowerCase();
-    const seen = [], out = [];
-    texts.forEach(t => t.split(/\r?\n/).forEach(l => {
-      const n = norm(l);
-      if (n.length < 2) return;
-      if (seen.some(x => x === n || x.includes(n) || n.includes(x) && n.length - x.length < 2)) return;
-      seen.push(n); out.push(l.trim());
-    }));
-    return out.join('\n');
+  // 이름 재인식: 이름 줄을 잘라 명암을 늘려(작은 글씨 포함) 한 줄 모드로 여러 번 읽고 다수결
+  function normCrop(src, sx, sy, sw, sh, k) {
+    const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k)), m = 40;
+    const t = document.createElement('canvas'); t.width = w; t.height = h;
+    t.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+    const id = t.getContext('2d').getImageData(0, 0, w, h), d = id.data, hist = new Array(256).fill(0);
+    for (let i = 0; i < d.length; i += 4) { const y = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]); d[i] = y; hist[y]++; }
+    const pick = f => { let c = 0, n = w * h * f; for (let v = 0; v < 256; v++) { c += hist[v]; if (c >= n) return v; } return 255; };
+    const lo = pick(0.02), hi = Math.max(lo + 20, pick(0.9));
+    for (let i = 0; i < d.length; i += 4) { const v = Math.max(0, Math.min(255, Math.round((d[i] - lo) * 255 / (hi - lo)))); d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+    t.getContext('2d').putImageData(id, 0, 0);
+    const c = document.createElement('canvas'); c.width = w + m * 2; c.height = h + m * 2;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(t, m, m);
+    return c;
   }
-
-  // 이름 재인식: 가장 큰 한글 이름 줄을 잘라 확대해서 여러 번 읽고 다수결 (이름+직책이 붙은 줄도 처리)
   async function refineName(worker, src, lines, current) {
-    const clean = t => (t || '').replace(/\s/g, '');
-    const nt = t => { const c = clean(t); return /^[가-힣]+$/.test(c) ? splitNameTitle(c) : null; };
+    const nt = t => looseName(t);
     const cands = lines.filter(l => l.bbox && (l.confidence || 0) >= 35 && nt(l.text));
     const votes = {}; let title = '';
     if (current) votes[current] = 1;
     if (cands.length) {
       cands.sort((x, y) => ((y.bbox.y1 - y.bbox.y0) * (y.confidence || 1)) - ((x.bbox.y1 - x.bbox.y0) * (x.confidence || 1)));
-      const top = cands[0], b = top.bbox, h = Math.max(1, b.y1 - b.y0), pad = Math.round(h * 0.4);
+      const top = cands[0], b = top.bbox, h = Math.max(1, b.y1 - b.y0), pad = Math.round(h * 0.15);
       const first = nt(top.text); votes[first.name] = (votes[first.name] || 0) + 1; title = first.title || '';
       const sx = Math.max(0, b.x0 - pad), sy = Math.max(0, b.y0 - pad);
       const sw = Math.min(src.width - sx, b.x1 - b.x0 + pad * 2), sh = Math.min(src.height - sy, h + pad * 2);
-      await worker.setParameters({ tessedit_pageseg_mode: '7' });
-      const s0 = 110 / h;
-      for (const k of [s0, s0 * 1.5]) {
-        const c = document.createElement('canvas'), m = 40;
-        c.width = Math.round(sw * k) + m * 2; c.height = Math.round(sh * k) + m * 2;
-        const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-        g.drawImage(src, sx, sy, sw, sh, m, m, Math.round(sw * k), Math.round(sh * k));
-        for (const mode of ['color', 'adaptive']) {
-          const res = await worker.recognize(await variant(c, mode));
+      const k = 110 / h;
+      for (const psm of ['7', '6']) {
+        await worker.setParameters({ tessedit_pageseg_mode: psm });
+        for (const kk of [k, k * 1.4]) {
+          const res = await worker.recognize(normCrop(src, sx, sy, sw, sh, kk));
           const r = nt(res.data.text);
           if (r) { votes[r.name] = (votes[r.name] || 0) + 1; if (!title && r.title) title = r.title; }
         }
       }
       await worker.setParameters({ tessedit_pageseg_mode: '11' });
     }
+    title = fuzzyTitle(title) || '';
     const ranked = Object.keys(votes).sort((x, y) => votes[y] - votes[x]);
     const best = ranked[0] || current || '';
     const alts = [...ranked.slice(1), ...altNames(best)].filter((v, i, a) => v !== best && a.indexOf(v) === i).slice(0, 6);
@@ -566,7 +615,7 @@ if (typeof document !== 'undefined') {
       say('명함 영역 찾는 중…');
       const crop = cropCard(orig);
       let src = crop.canvas;
-      const modes = ['color', 'adaptive', 'invert'];
+      const modes = ['adaptive', 'color', 'invert'];
       let pass = 0, quiet = true;
       worker = await Tesseract.createWorker('kor+eng', 1, {
         logger: m => {
@@ -584,13 +633,13 @@ if (typeof document !== 'undefined') {
       src = rotateCanvas(src, deg);
       if (crop.cropped || deg) { try { el('preview').src = src.toDataURL('image/jpeg', 0.8); } catch (e) {} }
       quiet = false;
-      const texts = [], lines = [];
+      const passes = [], lines = [];
       for (pass = 0; pass < modes.length; pass++) {
         const res = await worker.recognize(await variant(src, modes[pass]));
-        texts.push(res.data.text);
-        (res.data.lines || []).forEach(l => lines.push(l));
+        const ls = (res.data.lines || []).map(l => ({ text: l.text, confidence: l.confidence, bbox: l.bbox }));
+        passes.push(ls); ls.forEach(l => lines.push(l));
       }
-      const text = mergeTexts(texts);
+      const text = mergeLines(passes);
       const r = parseCard(text);
       quiet = true; say('이름 다시 확인 중…'); el('barfill').style.width = '95%';
       try {
