@@ -316,7 +316,9 @@ function cardRect(data, w, h) {
   let cxx = 0, cyy = 0, cxy = 0;
   for (let p = 0; p < N; p++) if (lab[p] === bestId) { const dx = (p % w) - mx, dy = Math.floor(p / w) - my; cxx += dx * dx; cyy += dy * dy; cxy += dx * dy; }
   let ang = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
-  if (Math.abs(ang) > 30 * Math.PI / 180) ang = 0;          // 세로 명함 등은 회전하지 않음
+  // 긴 쪽이 뚜렷하지 않은(정사각형에 가까운) 영역은 기울기를 믿지 않는다
+  const tr = (cxx + cyy) / 2, dt = Math.sqrt(Math.max(0, tr * tr - (cxx * cyy - cxy * cxy)));
+  if ((tr + dt) / Math.max(1e-9, tr - dt) < 1.3) ang = 0;
   const ca = Math.cos(ang), sa = Math.sin(ang);
   const us = [], vs = [];
   for (let p = 0; p < N; p++) if (lab[p] === bestId) {
@@ -466,6 +468,36 @@ if (typeof document !== 'undefined') {
       return { canvas: c, cropped: true };
     } catch (e) { return { canvas: src, cropped: false }; }
   }
+  // 캔버스를 90도 단위로 돌린다
+  function rotateCanvas(src, deg) {
+    if (!deg) return src;
+    const W = src.width, H = src.height, c = document.createElement('canvas');
+    const swap = deg === 90 || deg === 270;
+    c.width = swap ? H : W; c.height = swap ? W : H;
+    const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2); g.rotate(deg * Math.PI / 180);
+    g.drawImage(src, -W / 2, -H / 2);
+    return c;
+  }
+  // 글자가 바로 읽히는 방향 찾기: 작은 그림으로 빠르게 읽어 보고 잘 읽힌 단어가 가장 많은 방향을 고른다
+  async function pickRotation(worker, src) {
+    const k = Math.min(1, 1000 / Math.max(src.width, src.height));
+    const base = document.createElement('canvas'); base.width = Math.round(src.width * k); base.height = Math.round(src.height * k);
+    base.getContext('2d').drawImage(src, 0, 0, base.width, base.height);
+    const score = async deg => {
+      const res = await worker.recognize(await variant(rotateCanvas(base, deg), 'color'));
+      return (res.data.words || []).filter(w => (w.confidence || 0) >= 65 && (w.text || '').replace(/[^가-힣A-Za-z0-9]/g, '').length >= 2).length;
+    };
+    let best = { deg: 0, sc: await score(0) };
+    if (best.sc < 8) {
+      for (const deg of [180, 90, 270]) {
+        const sc = await score(deg);
+        if (sc > best.sc) best = { deg, sc };
+        if (best.sc >= 8) break;
+      }
+    }
+    return best.deg;
+  }
+
   // 여러 번 읽은 결과 합치기 (이미 있는 줄은 중복 제외)
   function mergeTexts(texts) {
     const norm = s => s.replace(/\s+/g, '').toLowerCase();
@@ -532,12 +564,13 @@ if (typeof document !== 'undefined') {
     try {
       const orig = await loadCanvas(file);
       say('명함 영역 찾는 중…');
-      const crop = cropCard(orig), src = crop.canvas;
-      if (crop.cropped) { try { el('preview').src = src.toDataURL('image/jpeg', 0.8); } catch (e) {} }
+      const crop = cropCard(orig);
+      let src = crop.canvas;
       const modes = ['color', 'adaptive', 'invert'];
-      let pass = 0;
+      let pass = 0, quiet = true;
       worker = await Tesseract.createWorker('kor+eng', 1, {
         logger: m => {
+          if (quiet) return;
           if (m.status === 'recognizing text') {
             const pct = Math.round(((pass + m.progress) / modes.length) * 90);
             el('barfill').style.width = pct + '%'; say('글자 읽는 중… ' + pct + '%');
@@ -546,6 +579,11 @@ if (typeof document !== 'undefined') {
       });
       // 11: 명함처럼 흩어진 글자를 찾는 모드
       await worker.setParameters({ tessedit_pageseg_mode: '11', preserve_interword_spaces: '1' });
+      say('글자 방향 확인 중…');
+      const deg = await pickRotation(worker, src);
+      src = rotateCanvas(src, deg);
+      if (crop.cropped || deg) { try { el('preview').src = src.toDataURL('image/jpeg', 0.8); } catch (e) {} }
+      quiet = false;
       const texts = [], lines = [];
       for (pass = 0; pass < modes.length; pass++) {
         const res = await worker.recognize(await variant(src, modes[pass]));
@@ -554,7 +592,7 @@ if (typeof document !== 'undefined') {
       }
       const text = mergeTexts(texts);
       const r = parseCard(text);
-      say('이름 다시 확인 중…'); el('barfill').style.width = '95%';
+      quiet = true; say('이름 다시 확인 중…'); el('barfill').style.width = '95%';
       try {
         const nm = await refineName(worker, src, lines, (r.lname || '') + (r.fname || ''));
         if (nm.best) { r.lname = nm.best.slice(0, 1); r.fname = nm.best.slice(1); }
