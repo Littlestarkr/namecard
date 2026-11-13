@@ -115,6 +115,7 @@ function parseCard(text) {
     return s;
   });
   const used = new Set();
+  let nameLine = '';
   const take = i => { used.add(i); return lines[i]; };
 
   // 이메일 / 웹
@@ -151,13 +152,26 @@ function parseCard(text) {
 
   // 주소
   const addrRe = /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)|[가-힣]+(시|군|구)\s|[가-힣0-9]+(로|길)\s?\d/;
+  const addrMore = /([가-힣]+(읍|면|동|리|로|길|번지|층|호|빌딩|타워|센터)|\d+-\d+)/;
+  const isContact = l => /@|\d{2,4}[-.\s]\d{3,4}[-.\s]\d{4}/.test(l);
   lines.forEach((l, i) => {
     if (used.has(i) || out.addr) return;
     if (addrRe.test(l) && /\d/.test(l)) {
-      let a = take(i);
-      if (lines[i + 1] && !used.has(i + 1) && /^\(.+\)$|^[가-힣0-9\s]*(층|호|동|빌딩)/.test(lines[i + 1])) a += ' ' + take(i + 1);
-      out.addr = a;
+      let a = take(i), k = i + 1, added = 0;
+      // 다음 줄이 주소의 이어지는 부분이면 최대 2줄까지 붙인다
+      while (added < 2 && lines[k] && !used.has(k) && !isContact(lines[k]) && (/^\(.+\)$/.test(lines[k]) || addrMore.test(lines[k]))) { a += ' ' + take(k); k++; added++; }
+      // 앞에 붙은 아이콘 찌꺼기(©, ®, @ 등) 제거
+      out.addr = a.replace(/^[^0-9가-힣A-Za-z(]+/, '').replace(/\s+/g, ' ').trim();
     }
+  });
+
+  // 이름+직책이 한 줄에 붙은 경우('황의상 부장')
+  lines.forEach((l, i) => {
+    if (used.has(i) || nameLine) return;
+    const t = l.replace(/\s/g, '');
+    if (!/^[가-힣]+$/.test(t)) return;
+    const nt = splitNameTitle(t);
+    if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
   });
 
   // 직책 / 회사 / 부서
@@ -187,7 +201,6 @@ function parseCard(text) {
   });
 
   // 이름: 한글 2~4자 단독 줄 → 영문 2~3단어 줄
-  let nameLine = '';
   lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
     const t = l.replace(/\s/g, '');
@@ -200,9 +213,31 @@ function parseCard(text) {
   if (/[가-힣]/.test(nameLine)) { out.lname = nameLine.slice(0, 1); out.fname = nameLine.slice(1); }
   else if (nameLine) { const p = nameLine.split(' '); out.fname = p.slice(0, -1).join(' '); out.lname = p[p.length - 1]; }
 
-  out.org = fixOrg(out.org);
+  if (!out.org && out.email) out.org = orgFromDomain(out.email);
   out.org = fixOrg(out.org);
   return out;
+}
+
+// 직책 단어(긴 것부터)와 '이름+직책' 분리: '황의상부장' → {name:'황의상', title:'부장'}
+const TITLE_WORDS = '대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
+function splitNameTitle(t) {
+  const m = (t || '').match(new RegExp('^([가-힣]{2,4}?)(' + TITLE_WORDS + ')?$'));
+  return m ? { name: m[1], title: m[2] || '' } : null;
+}
+// 이메일 도메인으로 회사명 추정 (로고 글자를 못 읽었을 때의 보조)
+const ORG_DOMAINS = {
+  'ibk.co.kr': 'IBK기업은행', 'kogas.or.kr': '한국가스공사', 'ksure.or.kr': '한국무역보험공사',
+  'kotra.or.kr': 'KOTRA', 'kita.net': '한국무역협회', 'kbstar.com': 'KB국민은행',
+  'shinhan.com': '신한은행', 'wooribank.com': '우리은행', 'hanafn.com': '하나은행',
+  'nonghyup.com': 'NH농협은행', 'kodit.co.kr': '신용보증기금', 'kibo.or.kr': '기술보증기금',
+  'kexim.go.kr': '한국수출입은행', 'kepco.co.kr': '한국전력공사', 'kotra.co.kr': 'KOTRA',
+  'mss.go.kr': '중소벤처기업부', 'motie.go.kr': '산업통상자원부', 'sbc.or.kr': '중소기업중앙회'
+};
+function orgFromDomain(email) {
+  const d = (email.split('@')[1] || '').toLowerCase();
+  const parts = d.split('.');
+  for (let i = 0; i < parts.length - 1; i++) { const k = parts.slice(i).join('.'); if (ORG_DOMAINS[k]) return ORG_DOMAINS[k]; }
+  return '';
 }
 
 // 회사명 보정: 로고 글자(IBK 등)가 깨져 읽힌 경우 + 자주 쓰는 기관명 사전
@@ -230,6 +265,74 @@ function altNames(name) {
   return out;
 }
 /* ===== PARSER_END ===== */
+
+/* ===== VISION_START ===== */
+// 사진에서 흰/회색 종이(명함) 영역을 찾아 중심·기울기·크기를 돌려준다. 못 찾으면 null.
+// data: RGBA 배열, w/h: 크기. 좌표는 입력 픽셀 기준.
+function cardRect(data, w, h) {
+  const N = w * h, mask = new Uint8Array(N);
+  for (let i = 0, j = 0; i < N; i++, j += 4) {
+    const r = data[j], g = data[j + 1], b = data[j + 2];
+    const v = Math.max(r, g, b), mn = Math.min(r, g, b);
+    mask[i] = (v >= 100 && (v - mn) <= 0.30 * v) ? 1 : 0;   // 밝고 채도 낮음 = 종이
+  }
+  // 글자 획 때문에 종이가 끊기지 않도록 닫기(팽창→침식)
+  const morph = (m, grow) => {
+    const R = 3, t = new Uint8Array(N), o = new Uint8Array(N), on = grow ? 1 : 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let hit = !on; for (let k = -R; k <= R; k++) { const xx = x + k; if (xx >= 0 && xx < w && m[y * w + xx] === on) { hit = !!on; break; } }
+      t[y * w + x] = hit ? 1 : 0;
+    }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let hit = !on; for (let k = -R; k <= R; k++) { const yy = y + k; if (yy >= 0 && yy < h && t[yy * w + x] === on) { hit = !!on; break; } }
+      o[y * w + x] = hit ? 1 : 0;
+    }
+    return o;
+  };
+  const closed = morph(morph(mask, true), false);
+  for (let i = 0; i < N; i++) mask[i] = closed[i];
+  // 가장 큰 연결 영역(4방향)
+  const lab = new Int32Array(N); let best = 0, bestId = 0, id = 0;
+  const stack = new Int32Array(N);
+  for (let s0 = 0; s0 < N; s0++) {
+    if (!mask[s0] || lab[s0]) continue;
+    id++; let sp = 0, cnt = 0; stack[sp++] = s0; lab[s0] = id;
+    while (sp) {
+      const p = stack[--sp]; cnt++;
+      const x = p % w, y = (p - x) / w;
+      if (x > 0 && mask[p - 1] && !lab[p - 1]) { lab[p - 1] = id; stack[sp++] = p - 1; }
+      if (x < w - 1 && mask[p + 1] && !lab[p + 1]) { lab[p + 1] = id; stack[sp++] = p + 1; }
+      if (y > 0 && mask[p - w] && !lab[p - w]) { lab[p - w] = id; stack[sp++] = p - w; }
+      if (y < h - 1 && mask[p + w] && !lab[p + w]) { lab[p + w] = id; stack[sp++] = p + w; }
+    }
+    if (cnt > best) { best = cnt; bestId = id; }
+  }
+  const frac = best / N;
+  if (frac < 0.06 || frac > 0.9) return null;
+  // 중심과 기울기(주축)
+  let sx = 0, sy = 0;
+  for (let p = 0; p < N; p++) if (lab[p] === bestId) { sx += p % w; sy += Math.floor(p / w); }
+  const mx = sx / best, my = sy / best;
+  let cxx = 0, cyy = 0, cxy = 0;
+  for (let p = 0; p < N; p++) if (lab[p] === bestId) { const dx = (p % w) - mx, dy = Math.floor(p / w) - my; cxx += dx * dx; cyy += dy * dy; cxy += dx * dy; }
+  let ang = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
+  if (Math.abs(ang) > 30 * Math.PI / 180) ang = 0;          // 세로 명함 등은 회전하지 않음
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const us = [], vs = [];
+  for (let p = 0; p < N; p++) if (lab[p] === bestId) {
+    const dx = (p % w) - mx, dy = Math.floor(p / w) - my;
+    us.push(dx * ca + dy * sa); vs.push(-dx * sa + dy * ca);
+  }
+  us.sort((a, b) => a - b); vs.sort((a, b) => a - b);
+  const lo = Math.floor(us.length * 0.003), hi = Math.min(us.length - 1, Math.ceil(us.length * 0.997));
+  let u0 = us[lo], u1 = us[hi], v0 = vs[lo], v1 = vs[hi];
+  const fill = best / (Math.max(1, (u1 - u0) * (v1 - v0)));
+  if (fill < 0.55) return null;                              // 직사각형답게 차 있어야 함
+  const mu = (u1 - u0) * 0.02 + 1, mv = (v1 - v0) * 0.02 + 1;
+  return { cx: mx, cy: my, ang, u0: u0 - mu, u1: u1 + mu, v0: v0 - mv, v1: v1 + mv, frac, fill };
+}
+/* ===== VISION_END ===== */
+
 
 if (typeof document !== 'undefined') {
   // 설치형 앱용 서비스 워커 (범위: NameCard.html 한 페이지)
@@ -311,19 +414,57 @@ if (typeof document !== 'undefined') {
       img.src = url;
     });
   }
-  // 변형: 'color'(원본 흑백), 'contrast'(대비 강화), 'invert'(반전: 어두운 바탕의 흰 글씨용)
+  // 변형: 'color'(원본 흑백), 'adaptive'(조명 고르지 않은 곳용 국소 이진화), 'invert'(반전: 어두운 바탕의 흰 글씨용)
   function variant(src, mode) {
-    const c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
+    const W = src.width, H = src.height;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d'); g.drawImage(src, 0, 0);
-    const d = g.getImageData(0, 0, c.width, c.height), p = d.data;
-    for (let i = 0; i < p.length; i += 4) {
-      let y = 0.299 * p[i] + 0.587 * p[i+1] + 0.114 * p[i+2];
-      if (mode !== 'color') y = Math.max(0, Math.min(255, (y - 128) * 1.5 + 128));
-      if (mode === 'invert') y = 255 - y;
-      p[i] = p[i+1] = p[i+2] = y;
+    const d = g.getImageData(0, 0, W, H), p = d.data;
+    const gray = new Uint8Array(W * H);
+    for (let i = 0, j = 0; j < p.length; i++, j += 4) gray[i] = 0.299 * p[j] + 0.587 * p[j+1] + 0.114 * p[j+2];
+    let out = gray;
+    if (mode === 'adaptive') {
+      const iw = W + 1, integ = new Float64Array(iw * (H + 1));
+      for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += gray[y * W + x]; integ[(y + 1) * iw + x + 1] = integ[y * iw + x + 1] + row; } }
+      const s2 = Math.max(8, Math.round(Math.max(W, H) / 32));
+      out = new Uint8Array(W * H);
+      for (let y = 0; y < H; y++) {
+        const y0 = Math.max(0, y - s2), y1 = Math.min(H - 1, y + s2);
+        for (let x = 0; x < W; x++) {
+          const x0 = Math.max(0, x - s2), x1 = Math.min(W - 1, x + s2);
+          const cnt = (x1 - x0 + 1) * (y1 - y0 + 1);
+          const sum = integ[(y1 + 1) * iw + x1 + 1] - integ[y0 * iw + x1 + 1] - integ[(y1 + 1) * iw + x0] + integ[y0 * iw + x0];
+          out[y * W + x] = gray[y * W + x] < (sum / cnt) * 0.88 ? 0 : 255;
+        }
+      }
+    } else if (mode === 'invert') {
+      out = new Uint8Array(W * H);
+      for (let i = 0; i < out.length; i++) out[i] = 255 - Math.max(0, Math.min(255, (gray[i] - 128) * 1.5 + 128));
     }
+    for (let i = 0, j = 0; i < out.length; i++, j += 4) { p[j] = p[j+1] = p[j+2] = out[i]; }
     g.putImageData(d, 0, 0);
     return new Promise(r => c.toBlob(r, 'image/png'));
+  }
+  // 사진에서 명함(밝은 종이)만 잘라 기울기를 바로잡는다. 못 찾으면 원본 그대로.
+  function cropCard(src) {
+    try {
+      const k = Math.min(1, 480 / Math.max(src.width, src.height));
+      const sw = Math.max(1, Math.round(src.width * k)), sh = Math.max(1, Math.round(src.height * k));
+      const sm = document.createElement('canvas'); sm.width = sw; sm.height = sh;
+      const sg = sm.getContext('2d'); sg.drawImage(src, 0, 0, sw, sh);
+      const r = cardRect(sg.getImageData(0, 0, sw, sh).data, sw, sh);
+      if (!r) return { canvas: src, cropped: false };
+      const f = 1 / k, cx = r.cx * f, cy = r.cy * f, u0 = r.u0 * f, u1 = r.u1 * f, v0 = r.v0 * f, v1 = r.v1 * f;
+      const W = u1 - u0, H = v1 - v0;
+      if (W < 200 || H < 100) return { canvas: src, cropped: false };
+      const s = Math.min(2.5, 2000 / Math.max(W, H));
+      const c = document.createElement('canvas'); c.width = Math.round(W * s); c.height = Math.round(H * s);
+      const g = c.getContext('2d'), ca = Math.cos(r.ang), sa = Math.sin(r.ang);
+      g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      g.setTransform(s * ca, -s * sa, s * sa, s * ca, -s * (ca * cx + sa * cy + u0), s * (sa * cx - ca * cy - v0));
+      g.drawImage(src, 0, 0);
+      return { canvas: c, cropped: true };
+    } catch (e) { return { canvas: src, cropped: false }; }
   }
   // 여러 번 읽은 결과 합치기 (이미 있는 줄은 중복 제외)
   function mergeTexts(texts) {
@@ -338,19 +479,19 @@ if (typeof document !== 'undefined') {
     return out.join('\n');
   }
 
-  // 이름 재인식: 가장 큰 한글 2~4자 줄을 잘라 확대해서 여러 번 읽고 다수결
+  // 이름 재인식: 가장 큰 한글 이름 줄을 잘라 확대해서 여러 번 읽고 다수결 (이름+직책이 붙은 줄도 처리)
   async function refineName(worker, src, lines, current) {
-    const isName = t => /^[가-힣]{2,4}$/.test(t);
     const clean = t => (t || '').replace(/\s/g, '');
-    const cands = lines.filter(l => l.bbox && isName(clean(l.text)));
-    const votes = {};
+    const nt = t => { const c = clean(t); return /^[가-힣]+$/.test(c) ? splitNameTitle(c) : null; };
+    const cands = lines.filter(l => l.bbox && (l.confidence || 0) >= 35 && nt(l.text));
+    const votes = {}; let title = '';
     if (current) votes[current] = 1;
     if (cands.length) {
-      cands.sort((x, y) => (y.bbox.y1 - y.bbox.y0) - (x.bbox.y1 - x.bbox.y0));
-      const b = cands[0].bbox, h = Math.max(1, b.y1 - b.y0), pad = Math.round(h * 0.4);
+      cands.sort((x, y) => ((y.bbox.y1 - y.bbox.y0) * (y.confidence || 1)) - ((x.bbox.y1 - x.bbox.y0) * (x.confidence || 1)));
+      const top = cands[0], b = top.bbox, h = Math.max(1, b.y1 - b.y0), pad = Math.round(h * 0.4);
+      const first = nt(top.text); votes[first.name] = (votes[first.name] || 0) + 1; title = first.title || '';
       const sx = Math.max(0, b.x0 - pad), sy = Math.max(0, b.y0 - pad);
       const sw = Math.min(src.width - sx, b.x1 - b.x0 + pad * 2), sh = Math.min(src.height - sy, h + pad * 2);
-      votes[clean(cands[0].text)] = (votes[clean(cands[0].text)] || 0) + 1;
       await worker.setParameters({ tessedit_pageseg_mode: '7' });
       const s0 = 110 / h;
       for (const k of [s0, s0 * 1.5]) {
@@ -358,10 +499,10 @@ if (typeof document !== 'undefined') {
         c.width = Math.round(sw * k) + m * 2; c.height = Math.round(sh * k) + m * 2;
         const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
         g.drawImage(src, sx, sy, sw, sh, m, m, Math.round(sw * k), Math.round(sh * k));
-        for (const mode of ['color', 'contrast']) {
+        for (const mode of ['color', 'adaptive']) {
           const res = await worker.recognize(await variant(c, mode));
-          const t = clean(res.data.text);
-          if (isName(t)) votes[t] = (votes[t] || 0) + 1;
+          const r = nt(res.data.text);
+          if (r) { votes[r.name] = (votes[r.name] || 0) + 1; if (!title && r.title) title = r.title; }
         }
       }
       await worker.setParameters({ tessedit_pageseg_mode: '11' });
@@ -369,7 +510,7 @@ if (typeof document !== 'undefined') {
     const ranked = Object.keys(votes).sort((x, y) => votes[y] - votes[x]);
     const best = ranked[0] || current || '';
     const alts = [...ranked.slice(1), ...altNames(best)].filter((v, i, a) => v !== best && a.indexOf(v) === i).slice(0, 6);
-    return { best, alts };
+    return { best, alts, title };
   }
   function showAlts(alts) {
     const box = el('alts'); box.innerHTML = '';
@@ -389,8 +530,11 @@ if (typeof document !== 'undefined') {
     say('사진 준비 중…'); el('alts').innerHTML = '';
     let worker;
     try {
-      const src = await loadCanvas(file);
-      const modes = ['color', 'contrast', 'invert'];
+      const orig = await loadCanvas(file);
+      say('명함 영역 찾는 중…');
+      const crop = cropCard(orig), src = crop.canvas;
+      if (crop.cropped) { try { el('preview').src = src.toDataURL('image/jpeg', 0.8); } catch (e) {} }
+      const modes = ['color', 'adaptive', 'invert'];
       let pass = 0;
       worker = await Tesseract.createWorker('kor+eng', 1, {
         logger: m => {
@@ -414,6 +558,7 @@ if (typeof document !== 'undefined') {
       try {
         const nm = await refineName(worker, src, lines, (r.lname || '') + (r.fname || ''));
         if (nm.best) { r.lname = nm.best.slice(0, 1); r.fname = nm.best.slice(1); }
+        if (!r.title && nm.title) r.title = nm.title;
         showAlts(nm.alts);
       } catch (e) {}
       el('raw').value = text;
