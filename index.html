@@ -34,6 +34,12 @@
   .bar i { display:block; height:100%; width:0; background:var(--navy); transition:width .2s; }
   .hint { font-size:12px; color:#7a8296; margin-top:6px; line-height:1.5; }
   details { margin-top:12px; font-size:13px; }
+  #queue { margin-top:14px; padding:12px; border:1px solid var(--line); border-radius:12px; background:#f8faff; font-size:14px; }
+  .qh { font-weight:700; color:var(--navy); margin-bottom:6px; }
+  .qrow { display:flex; align-items:center; gap:6px; padding:6px 0; border-bottom:1px solid #e8ecf5; }
+  .qrow span { flex:1; }
+  .mini { width:auto; margin:0; padding:6px 10px; font-size:13px; font-weight:600; border-radius:8px; background:#e8edf7; color:var(--navy); }
+  #queue > .mini { margin-top:10px; }
   .chip { display:inline-block; margin:4px 6px 0 0; padding:6px 12px; border-radius:16px; border:1px solid var(--line); background:#eef2fa; color:var(--navy); font-size:15px; font-weight:700; cursor:pointer; width:auto; }
   .help { font-size:13px; color:#4a5266; line-height:1.65; }
 </style>
@@ -75,7 +81,8 @@
 
     <button type="button" id="dl">연락처 파일(.vcf) 받기</button>
     <button type="button" class="alt" id="share" hidden>공유로 바로 열기</button>
-    <button type="button" class="alt" id="reset">다음 명함</button>
+    <button type="button" class="alt" id="reset">이 명함 담고 다음 명함 ▶</button>
+    <div id="queue" style="display:none"></div>
     <div class="status" id="msg"></div>
 
     <details>
@@ -233,23 +240,57 @@ if (typeof document !== 'undefined') {
   const esc = s => s.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/;/g,'\\;').replace(/,/g,'\\,');
   const say = (t, id='status') => { el(id).textContent = t; };
 
-  function buildVcf() {
+  const getCard = () => { const c = {}; IDS.forEach(k => c[k] = val(k)); return c; };
+  const hasName = c => !!(c.lname || c.fname);
+  function vcfOne(c) {
     const L = ['BEGIN:VCARD', 'VERSION:3.0'];
-    L.push('N:' + esc(val('lname')) + ';' + esc(val('fname')) + ';;;');
-    L.push('FN:' + esc(val('lname') + val('fname')));
-    if (val('org') || val('dept')) L.push('ORG:' + esc(val('org')) + ';' + esc(val('dept')));
-    if (val('title')) L.push('TITLE:' + esc(val('title')));
-    if (val('mobile')) L.push('TEL;TYPE=CELL:' + val('mobile'));
-    if (val('tel')) L.push('TEL;TYPE=WORK,VOICE:' + val('tel'));
-    if (val('fax')) L.push('TEL;TYPE=WORK,FAX:' + val('fax'));
-    if (val('email')) L.push('EMAIL;TYPE=WORK:' + val('email'));
-    if (val('web')) L.push('URL:' + val('web'));
-    if (val('addr')) L.push('ADR;TYPE=WORK:;;' + esc(val('addr')) + ';;;;');
-    if (val('ext')) L.push('NOTE:' + esc('내선 ' + val('ext')));
+    L.push('N:' + esc(c.lname) + ';' + esc(c.fname) + ';;;');
+    L.push('FN:' + esc(c.lname + c.fname));
+    if (c.org || c.dept) L.push('ORG:' + esc(c.org) + ';' + esc(c.dept));
+    if (c.title) L.push('TITLE:' + esc(c.title));
+    if (c.mobile) L.push('TEL;TYPE=CELL:' + c.mobile);
+    if (c.tel) L.push('TEL;TYPE=WORK,VOICE:' + c.tel);
+    if (c.fax) L.push('TEL;TYPE=WORK,FAX:' + c.fax);
+    if (c.email) L.push('EMAIL;TYPE=WORK:' + c.email);
+    if (c.web) L.push('URL:' + c.web);
+    if (c.addr) L.push('ADR;TYPE=WORK:;;' + esc(c.addr) + ';;;;');
+    if (c.ext) L.push('NOTE:' + esc('내선 ' + c.ext));
     L.push('END:VCARD');
     return L.join('\r\n') + '\r\n';
   }
-  const fileName = () => ((val('lname') + val('fname')) || 'contact') + '.vcf';
+
+  // ---- 담아 둔 명함 목록 (여러 장을 한 파일로) ----
+  const KEY = 'namecard-queue-v1';
+  let queue = [];
+  try { queue = JSON.parse(localStorage.getItem(KEY) || '[]'); if (!Array.isArray(queue)) queue = []; } catch (e) { queue = []; }
+  const saveQueue = () => { try { localStorage.setItem(KEY, JSON.stringify(queue)); } catch (e) {} };
+  // 파일에 들어갈 명함: 담아 둔 것 + 지금 칸에 입력된 것
+  const allCards = () => { const cur = getCard(); return hasName(cur) ? [...queue, cur] : [...queue]; };
+  const buildVcf = () => allCards().map(vcfOne).join('');
+  const fileName = () => {
+    const l = allCards();
+    return (l.length === 1 ? (l[0].lname + l[0].fname) : '명함_' + l.length + '명') + '.vcf';
+  };
+  function renderQueue() {
+    const box = el('queue'), n = allCards().length;
+    el('dl').textContent = '연락처 파일(.vcf) 받기' + (n > 1 ? ' (' + n + '명)' : '');
+    if (!queue.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.style.display = 'block'; box.innerHTML = '';
+    const h = document.createElement('div'); h.className = 'qh'; h.textContent = '담아 둔 명함 ' + queue.length + '명';
+    box.appendChild(h);
+    queue.forEach((c, i) => {
+      const row = document.createElement('div'); row.className = 'qrow';
+      const t = document.createElement('span'); t.textContent = (c.lname + c.fname) + (c.org ? ' · ' + c.org : '');
+      const e = document.createElement('button'); e.type = 'button'; e.className = 'mini'; e.textContent = '수정';
+      e.addEventListener('click', () => { IDS.forEach(k => el(k).value = c[k] || ''); queue.splice(i, 1); saveQueue(); renderQueue(); el('f').scrollIntoView({ behavior: 'smooth' }); say('수정 후 다시 담거나 바로 받으세요.', 'msg'); });
+      const d = document.createElement('button'); d.type = 'button'; d.className = 'mini'; d.textContent = '삭제';
+      d.addEventListener('click', () => { queue.splice(i, 1); saveQueue(); renderQueue(); });
+      row.append(t, e, d); box.appendChild(row);
+    });
+    const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'mini'; clr.textContent = '목록 모두 비우기';
+    clr.addEventListener('click', () => { if (confirm('담아 둔 명함을 모두 지울까요?')) { queue = []; saveQueue(); renderQueue(); } });
+    box.appendChild(clr);
+  }
 
   // 이미지 불러오기 → 확대/축소한 캔버스
   function loadCanvas(file) {
@@ -386,21 +427,29 @@ if (typeof document !== 'undefined') {
   el('gal').addEventListener('change', e => handle(e.target.files[0]));
 
   el('dl').addEventListener('click', () => {
-    if (!val('lname') && !val('fname')) { say('이름을 입력해 주세요.', 'msg'); return; }
+    const list = allCards();
+    if (!list.length) { say('이름을 입력해 주세요.', 'msg'); return; }
     const url = URL.createObjectURL(new Blob([buildVcf()], { type: 'text/vcard;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = fileName();
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    say('파일을 받았습니다. 다운로드 알림이나 내 파일에서 열어 저장하세요.', 'msg');
+    say(list.length + '명 파일을 받았습니다. 다운로드 알림이나 내 파일에서 열어 저장하세요. (저장이 끝나면 아래 목록을 비우세요)', 'msg');
   });
 
+  // 지금 명함을 목록에 담고 칸을 비운 뒤 다음 명함 준비
   el('reset').addEventListener('click', () => {
+    const cur = getCard();
+    if (hasName(cur)) { queue.push(cur); saveQueue(); }
     IDS.forEach(k => el(k).value = ''); el('raw').value = ''; el('alts').innerHTML = '';
     el('preview').style.display = 'none'; el('bar').style.display = 'none';
     el('cam').value = ''; el('gal').value = '';
-    say('다음 명함을 찍어 주세요.'); say('', 'msg');
+    renderQueue();
+    say('담았습니다. 다음 명함을 찍어 주세요. 다 담았으면 아래 \'연락처 파일 받기\'를 누르세요.');
+    say(queue.length ? queue.length + '명이 담겨 있습니다.' : '', 'msg');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
+  IDS.forEach(k => el(k).addEventListener('input', renderQueue));
+  renderQueue();
 
   try {
     const t = new File(['x'], 'x.vcf', { type: 'text/vcard' });
