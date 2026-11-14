@@ -138,6 +138,7 @@ function parseCard(text) {
   const out = { lname:'', fname:'', org:'', dept:'', title:'', mobile:'', tel:'', ext:'', fax:'', email:'', web:'', addr:'' };
   // OCR 정리: 한글 사이 공백 제거, 줄 단위 분리
   let lines = text.split(/\r?\n/).map(s => s.replace(/[ \t]+/g, ' ').trim()).filter(Boolean);
+  lines = lines.map(s => s.replace(/([가-힣]학)\s+(박사|석사)/g, '$1$2'));   // '컨설팅학 박사' → '컨설팅학박사'
   lines = lines.map(s => {
     const toks = s.split(' ');
     const singles = toks.filter(t => /^[가-힣]$/.test(t)).length;
@@ -215,7 +216,7 @@ function parseCard(text) {
 
   // 주소
   const addrRe = /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)|[가-힣]+(시|군|구)\s|[가-힣0-9]+(로|길)\s?\d/;
-  const addrMore = /([가-힣]+(읍|면|동|리|로|길|번지|층|호|빌딩|타워|센터)|\d+-\d+|\d+\s?층)/;
+  const addrMore = /([가-힣]+(읍|면|동|리|로|길|번지|층|호|빌딩|타워|센터)|\d+-\d+|\d+\s?[층호]|\s(?:타워|빌딩|센터|프라자|플라자)(?:\s|$))/;
   const isContact = l => /@|\d{2,4}[-.\s]\d{3,4}[-.\s]\d{4}/.test(l);
   lines.forEach((l, i) => {
     if (used.has(i) || out.addr) return;
@@ -267,6 +268,13 @@ function parseCard(text) {
       });
       used.add(i);
     }
+  });
+  // '(주)꿈제작소 대표이사' 처럼 회사명 뒤에 직책이 붙은 줄: 회사와 직책으로 나눈다
+  lines.forEach((l, i) => {
+    if (used.has(i) || out.org || addrRe.test(l) || /\d{2,}|@/.test(l)) return;
+    const m = l.match(new RegExp('^(.*\\S)\\s+((?:' + TITLE_WORDS + ')+)$'));
+    if (!m || !orgRe.test(m[1])) return;
+    out.org = m[1]; out.title = out.title ? m[2] + ' / ' + out.title : m[2]; used.add(i);
   });
   lines.forEach((l, i) => {
     if (used.has(i)) return;
@@ -341,7 +349,7 @@ function parseCard(text) {
 }
 
 // 직책 단어(긴 것부터)와 '이름+직책' 분리: '황의상부장' → {name:'황의상', title:'부장'}
-const TITLE_WORDS = '경영학박사|경제학박사|무역학박사|행정학박사|정치학박사|사회학박사|교육학박사|공학박사|법학박사|이학박사|의학박사|문학박사|신학박사|경영지도사|기술지도사|관세사|파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
+const TITLE_WORDS = '경영컨설팅학박사|국제통상학박사|국제무역학박사|컨설팅학박사|경영학박사|경제학박사|무역학박사|행정학박사|정치학박사|사회학박사|교육학박사|상담학박사|심리학박사|통계학박사|회계학박사|금융학박사|관광학박사|철학박사|공학박사|법학박사|이학박사|의학박사|문학박사|신학박사|경영지도사|기술지도사|관세사|파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
 function splitNameTitle(t) {
   const pm = (t || '').match(/^(대표이사|대표|부회장|회장|부사장|사장)([가-힣]{2,4})$/);   // '대표김시균', '대표잘과'
   if (pm) return (pm[2].length >= 3 && isTitleLike(pm[2])) ? null : { name: pm[2], title: pm[1] };   // '대표커설턴트'는 이름이 아님
