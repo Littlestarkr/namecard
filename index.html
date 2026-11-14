@@ -1129,6 +1129,7 @@ if (typeof document !== 'undefined') {
     return paddleLoad;
   }
   async function handlePaddle(src) {
+    const t0 = performance.now();
     try {
       say('글자 인식 준비 중… (처음 한 번은 오래 걸립니다)'); el('barfill').style.width = '10%';
       await loadPaddle();
@@ -1177,11 +1178,13 @@ if (typeof document !== 'undefined') {
       IDS.forEach(k2 => { if (r[k2]) el(k2).value = r[k2]; });
       try { showEmailAlts(r.email); } catch (e) {}
       el('barfill').style.width = '100%';
-      say('완료! 이름·회사는 비슷한 글자로 잘못 읽힐 수 있으니 꼭 확인하세요.');
+      say('완료! (' + ((performance.now() - t0) / 1000).toFixed(1) + '초) 이름·회사는 비슷한 글자로 잘못 읽힐 수 있으니 꼭 확인하세요.');
       el('f').scrollIntoView({ behavior: 'smooth' });
       return true;
     } catch (e) { console.warn('Paddle 실패 → Tesseract', e); return false; }
   }
+  // 앱을 열자마자 뒤에서 PaddleOCR을 미리 준비해 둔다(첫 사진부터 '준비 중' 대기를 없앰). 실패해도 무시.
+  setTimeout(() => { if (navigator.onLine !== false) loadPaddle().then(() => window.PaddleKR.init(() => {})).catch(() => {}); }, 1500);
   async function handle(srcIn) {
     if (!srcIn) return;
     el('bar').style.display = 'block'; el('barfill').style.width = '3%';
