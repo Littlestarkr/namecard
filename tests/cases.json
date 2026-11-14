@@ -173,5 +173,19 @@
     "expect": {
       "email": "vinoo1@naver.com"
     }
+  },
+  {
+    "name": "한 글자 라벨 E. 이 이메일에 붙음(E.bobby1004@…)",
+    "ocr": "(주)스타벤처스\n문지은 Bobby Moon\n경영학박사/대표이사\n경기도 성남시 수정구 대왕판교로 815\nP.010-6312-5667\nE.bobby1004@gmail.com\nH.www.sven.co.kr",
+    "expect": {
+      "email": "bobby1004@gmail.com"
+    }
+  },
+  {
+    "name": "이메일 앞에 점만 남음(.bobby1004@…)",
+    "ocr": "(주)스타벤처스\n문지은 Bobby Moon\n경영학박사/대표이사\n경기도 성남시 수정구 대왕판교로 815\nP.010-6312-5667\nE. .bobby1004@gmail.com",
+    "expect": {
+      "email": "bobby1004@gmail.com"
+    }
   }
 ]
