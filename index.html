@@ -288,7 +288,7 @@ function parseCard(text) {
   if (!out.org && out.email) out.org = isEn ? orgFromDomainEn(out.email) : orgFromDomain(out.email);
   if (isEn && out.org && /[가-힣]/.test(out.org) && out.email) out.org = orgFromDomainEn(out.email) || out.org;
   out.email = fixEmail(out.email);
-  if (!out.org && !isEn) out.org = (out.web ? orgFromDomain(out.web) : '') || orgFromText(text);
+  if (!isEn) out.org = reconcileOrg(out.org, out.email, out.web, text);
   out.org = fixOrg(out.org);
   const cleanField = v => { if (!v) return ''; if (!/[가-힣]/.test(v)) return v.split(/\s+/).every(w => /^([A-Z][a-z]{2,}|[A-Z]{2,5}|&|of|and|the|[A-Z][a-z]+-[A-Z]?[a-z]+)$/.test(w)) ? v : ''; const h = (v.match(/[가-힣]/g) || []).length, e = (v.match(/[A-Za-z]/g) || []).length, o = (v.match(/[^가-힣A-Za-z0-9\s&().-]/g) || []).length; return (h >= 2 && e <= h && o <= 1) ? v : ''; };
   if (out.dept && !deptRe.test(out.dept)) out.dept = '';
@@ -329,6 +329,14 @@ function orgFromDomain(email) {
   // OCR이 도메인 한 글자를 잘못 읽은 경우(kibo.or.kr → klbo.or.kr)
   for (const k of Object.keys(ORG_DOMAINS)) if (k.length >= 8 && lev(d, k) <= 1) return ORG_DOMAINS[k];
   return '';
+}
+// 회사명 맞추기: 이메일·웹·로고 글자로 알아낸 기관명이 있고, 읽은 회사명이 비슷하거나 비었으면 그것으로 바꾼다 ('술보증기금' → '기술보증기금')
+function reconcileOrg(org, email, web, text) {
+  const dom = orgFromDomain(email) || orgFromDomain(web) || orgFromText(text);
+  if (!dom) return org;
+  const o = (org || '').replace(/\s/g, '');
+  if (!o || dom.includes(o) || o.includes(dom.replace(/\s/g, '')) || lev(o, dom) <= 3) return dom;
+  return org;
 }
 // 이메일 보정: 'orkr'→'or.kr' 같은 점 빠짐, 알려진 기관 도메인과 한 글자 차이면 맞춰 줌
 function fixEmail(e) {
@@ -762,8 +770,13 @@ if (typeof document !== 'undefined') {
     }
     title = fuzzyTitle(title) || '';
     const ranked = Object.keys(votes).sort((x, y) => votes[y] - votes[x]);
-    const best = ranked[0] || current || '';
-    const gen = altNames(best);
+    let best = ranked[0] || current || '';
+    let gen = altNames(best);
+    // 드문 성(예: '기')으로 읽혔는데 흔한 성·이름 글자로 된 후보가 있으면 그 후보를 먼저 채운다 (원래 읽은 값은 후보 칩에 남김)
+    const top = gen[0];
+    if (best.length >= 2 && !SURNAMES.includes(best[0]) && top && SURNAMES.includes(top[0]) && [...top].slice(1).every(c => GIVEN_COMMON.includes(c))) {
+      const old = best; best = top; gen = [old, ...altNames(best)];
+    }
     const alts = [...gen.slice(0, 4), ...ranked.slice(1), ...gen.slice(4)].filter((v, i, a) => v !== best && a.indexOf(v) === i).slice(0, 8);
     return { best, alts, title };
   }
@@ -897,7 +910,7 @@ if (typeof document !== 'undefined') {
       } catch (e) {}
       if (!r.dept) { try { say('부서 다시 확인 중…'); r.dept = await findDept(worker, src, lines); } catch (e) {} }
       if (r.email) { try { say('이메일 다시 확인 중…'); r.email = await refineEmail(worker, src, lines, r.email); } catch (e) {} }
-      if (!r.org && r.email) r.org = /[가-힣]/.test((r.lname || '') + (r.fname || '')) ? orgFromDomain(r.email) : orgFromDomainEn(r.email);
+      if (/[가-힣]/.test((r.lname || '') + (r.fname || ''))) r.org = reconcileOrg(r.org, r.email, r.web, text); else if (!r.org && r.email) r.org = orgFromDomainEn(r.email);
       el('raw').value = text;
       IDS.forEach(k => { if (r[k]) el(k).value = r[k]; });
       el('barfill').style.width = '100%';
