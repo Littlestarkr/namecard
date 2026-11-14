@@ -212,7 +212,7 @@ function parseCard(text) {
 
   // 주소
   const addrRe = /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)|[가-힣]+(시|군|구)\s|[가-힣0-9]+(로|길)\s?\d/;
-  const addrMore = /([가-힣]+(읍|면|동|리|로|길|번지|층|호|빌딩|타워|센터)|\d+-\d+)/;
+  const addrMore = /([가-힣]+(읍|면|동|리|로|길|번지|층|호|빌딩|타워|센터)|\d+-\d+|\d+\s?층)/;
   const isContact = l => /@|\d{2,4}[-.\s]\d{3,4}[-.\s]\d{4}/.test(l);
   lines.forEach((l, i) => {
     if (used.has(i) || out.addr) return;
@@ -222,6 +222,7 @@ function parseCard(text) {
       while (added < 2 && lines[k] && !used.has(k) && !isContact(lines[k]) && (/^\(.+\)$/.test(lines[k]) || addrMore.test(lines[k]))) { a += ' ' + take(k); k++; added++; }
       // 앞에 붙은 아이콘 찌꺼기(©, ®, @ 등) 제거
       out.addr = a.replace(/^[^0-9가-힣A-Za-z(]+/, '').replace(/^(?:[A-Z]{2,}\s+)+(?=[가-힣])/, '').replace(/^[가-힣\s]{2,12}\s*[:：]\s*/, '').replace(/\s+/g, ' ').trim();
+      out.addr = cleanAddr(out.addr);
     }
   });
 
@@ -237,13 +238,14 @@ function parseCard(text) {
   // 이름+직책이 한 줄에 붙은 경우('황의상 부장')
   lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
+    if (new RegExp('^(' + TITLE_WORDS + ')+$').test(l.replace(/[^가-힣]/g, ''))) return;   // 직책 단어뿐인 줄은 이름이 아님
     const nt = looseName(l);
     if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
   });
 
   // 직책 / 회사 / 부서
-  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석|파트너|변호사|변리사|법무사|노무사|감정평가사)|\b(CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|Attorney|Partner|Counsel|Lawyer)\b/i;
-  const orgRe = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|연구원|대학교?|센터|그룹|\bInc\b\.?|Co\.?,?\s*Ltd|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i;
+  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석|파트너(?![스즈])|변호사|변리사|법무사|노무사|감정평가사|경영지도사|기술지도사|관세사|공인중개사)|\b(CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|Attorney|Partner|Counsel|Lawyer)\b/i;
+  const orgRe = /(파트너스|파트너즈|컨설팅|컴퍼니|법인|사무소|주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|연구원|대학교?|센터|그룹|\bInc\b\.?|Co\.?,?\s*Ltd|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i;
   const deptRe = /(본부|팀|부$|실$|지점|지사|과$|센터|사업부|영업|연구소|\bDept|Division|Team)/i;
   lines.forEach((l, i) => {
     if (used.has(i)) return;
@@ -251,6 +253,7 @@ function parseCard(text) {
     const parts = l.split(/\s*[|/·ㅣ]\s*/).filter(Boolean);
     if (parts.length > 1) {
       parts.forEach(p => {
+        if (!nameLine && /^[가-힣]{2,4}$/.test(p.trim()) && !new RegExp('^(' + TITLE_WORDS + ')+$').test(p.trim()) && !titleRe.test(p) && !orgRe.test(p) && !deptRe.test(p)) { nameLine = p.trim(); return; }
         const strongOrg = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|대학교?|그룹|\bInc\b|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i.test(p);
         if (!out.title && titleRe.test(p) && !strongOrg && !deptRe.test(p)) out.title = p;
         else if (!out.org && /연구소$/.test(p.trim()) && !/(팀|본부|사업부)/.test(p)) out.org = p.trim();
@@ -290,6 +293,7 @@ function parseCard(text) {
   // 이름: 한글 2~4자 단독 줄 → 영문 2~3단어 줄
   lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
+    if (new RegExp('^(' + TITLE_WORDS + ')+$').test(l.replace(/[^가-힣]/g, ''))) return;   // 직책 단어뿐인 줄은 이름이 아님
     const nt = looseName(l);
     if (nt && !nt.title) { nameLine = nt.name; used.add(i); }
     else if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
@@ -326,7 +330,7 @@ function parseCard(text) {
 }
 
 // 직책 단어(긴 것부터)와 '이름+직책' 분리: '황의상부장' → {name:'황의상', title:'부장'}
-const TITLE_WORDS = '파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
+const TITLE_WORDS = '경영지도사|기술지도사|관세사|파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
 function splitNameTitle(t) {
   const pm = (t || '').match(/^(대표이사|대표|부회장|회장|부사장|사장)([가-힣]{2,4})$/);   // '대표김시균', '대표잘과'
   if (pm) return { name: pm[2], title: pm[1] };
@@ -376,6 +380,15 @@ function reconcileOrg(org, email, web, text) {
   return org;
 }
 // 이메일 보정: 'orkr'→'or.kr' 같은 점 빠짐, 알려진 기관 도메인과 한 글자 차이면 맞춰 줌
+// 주소 찌꺼기 정리: 위치 아이콘이 'O'로, 가장자리 선이 '^' 등으로 읽힌 것을 지우고 '로/길' 뒤 번지 앞에 공백을 넣는다
+function cleanAddr(a) {
+  return (a || '')
+    .replace(/^[A-Za-z0-9]{1,2}\s+(?=[가-힣])/, '')
+    .replace(/\s[\^~|_`]+(?=\s|$)/g, ' ')
+    .replace(/[\s^~|_`'"°•·,;:]+$/, '')
+    .replace(/([가-힣])(로|길)(\d)/g, '$1$2 $3')
+    .replace(/\s+/g, ' ').trim();
+}
 function fixEmail(e) {
   if (!e || !e.includes('@')) return e;
   let [u, d] = e.toLowerCase().split('@');
@@ -974,13 +987,19 @@ if (typeof document !== 'undefined') {
     // 숫자 덩어리 바로 앞의 o·l은 숫자일 가능성이 높아 한꺼번에 바꾼 후보도 추가
     const t = u.replace(/[oO](?=\d)/g, '0').replace(/[l](?=\d)/g, '1');
     if (t !== u) out.add(t + '@' + d);
+    // 끝자리 l·I는 숫자 1일 가능성이 높아 가장 먼저 보여 준다(vinoo1 → vinool)
+    const first = [];
+    if (/[lI]$/.test(u)) first.push(u.slice(0, -1) + '1@' + d);
+    if (/[oO]$/.test(u)) first.push(u.slice(0, -1) + '0@' + d);
+    for (let i = 0; i < u.length; i++) if (/[lI1]/.test(u[i])) for (const r of 'l1I') if (r !== u[i]) out.add(u.slice(0, i) + r + u.slice(i + 1) + '@' + d);
     out.delete(email);
-    return [...out].slice(0, 4);
+    const all = [...new Set([...first, ...out])].filter(x => x !== email);
+    return all.slice(0, 6);
   }
   function showEmailAlts(email) {
     const box = el('emalts'); box.innerHTML = '';
     const a = emailAlts(email); if (!a.length) return;
-    box.append('0/o 확인: ');
+    box.append('0/o·1/l 확인: ');
     a.forEach(n => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = n;
       b.addEventListener('click', () => { el('email').value = n; });
@@ -1076,10 +1095,11 @@ if (typeof document !== 'undefined') {
       const r = parseCard(text);
       quiet = true; say('이름 다시 확인 중…'); el('barfill').style.width = '95%';
       try {
-        if (!/[가-힣]/.test((r.lname || '') + (r.fname || '')) && /[가-힣]/.test(r.title || '')) {   // 한글 직책은 있는데 한글 이름이 없는 경우
+        const nmLen = ((r.lname || '') + (r.fname || '')).replace(/[^가-힣]/g, '').length;
+        if ((nmLen === 0 || nmLen === 2) && /[가-힣]/.test(r.title || '')) {   // 한글 직책은 있는데 이름이 없거나 2글자뿐(오인식 의심)인 경우
           say('이름 찾는 중…');
           const rc = await recoverNameNearTitle(worker, src, lines);
-          if (rc) { r.lname = rc.best.slice(0, 1); r.fname = rc.best.slice(1); showAlts(rc.alts); }
+          if (rc && rc.best && (nmLen === 0 || rc.best.length >= 3)) { r.lname = rc.best.slice(0, 1); r.fname = rc.best.slice(1); showAlts(rc.alts); }
         }
         if (!/[가-힣]/.test((r.lname || '') + (r.fname || ''))) throw new Error('영문 명함');
         const nm = await refineName(worker, src, lines, (r.lname || '') + (r.fname || ''));
