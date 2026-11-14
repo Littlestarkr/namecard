@@ -1,6 +1,6 @@
 // 명함 스캔: 설치형 앱(PWA)용 서비스 워커
 // - 앱 화면은 '인터넷이 되면 최신, 안 되면 저장본', 글자 인식 엔진·언어 데이터는 한 번 받으면 저장본을 쓴다.
-const CACHE = 'namecard-v16';
+const CACHE = 'namecard-v17';
 const SHELL = ['./', './namecard.webmanifest', './namecard-icon-192.png', './namecard-icon-512.png', './namecard-apple-touch-icon.png'];
 const CDN = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com'];
 

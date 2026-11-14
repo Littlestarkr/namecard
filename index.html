@@ -201,7 +201,7 @@ function parseCard(text) {
       // 다음 줄이 주소의 이어지는 부분이면 최대 2줄까지 붙인다
       while (added < 2 && lines[k] && !used.has(k) && !isContact(lines[k]) && (/^\(.+\)$/.test(lines[k]) || addrMore.test(lines[k]))) { a += ' ' + take(k); k++; added++; }
       // 앞에 붙은 아이콘 찌꺼기(©, ®, @ 등) 제거
-      out.addr = a.replace(/^[^0-9가-힣A-Za-z(]+/, '').replace(/\s+/g, ' ').trim();
+      out.addr = a.replace(/^[^0-9가-힣A-Za-z(]+/, '').replace(/^(?:[A-Z]{2,}\s+)+(?=[가-힣])/, '').replace(/^[가-힣\s]{2,12}\s*[:：]\s*/, '').replace(/\s+/g, ' ').trim();
     }
   });
 
@@ -231,7 +231,9 @@ function parseCard(text) {
     const parts = l.split(/\s*[|/·ㅣ]\s*/).filter(Boolean);
     if (parts.length > 1) {
       parts.forEach(p => {
-        if (!out.org && orgRe.test(p) && !deptRe.test(p)) out.org = p;
+        const strongOrg = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|대학교?|그룹|\bInc\b|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i.test(p);
+        if (!out.title && titleRe.test(p) && !strongOrg && !deptRe.test(p)) out.title = p;
+        else if (!out.org && orgRe.test(p) && !deptRe.test(p)) out.org = p;
         else if (!out.dept && deptRe.test(p) && !titleRe.test(p)) out.dept = p;
         else if (!out.title && titleRe.test(p)) out.title = p;
       });
@@ -249,12 +251,14 @@ function parseCard(text) {
   if (!out.org) lines.forEach((l, i) => {
     if (out.org || used.has(i) || addrRe.test(l) || deptRe.test(l) || titleRe.test(l) || /\d|@/.test(l)) return;
     const m = l.match(/^[^가-힣]{0,3}([가-힣]{3,8})(?:\s|$|\()/);
-    if (m && !looseName(l)) { out.org = m[1]; used.add(i); }
+    const jm = l.match(/^[^가-힣]{0,3}(?:쥐\s*[|ㅣ]?|주\s*[|ㅣ])\s*([가-힣]{2,6})(?:\s|$)/);
+    if (jm) { out.org = '(주)' + jm[1]; used.add(i); }
+    else if (m && !looseName(l)) { out.org = /^[쥐주]([가-힣]{2,6})$/.test(m[1]) ? '(주)' + m[1].slice(1) : m[1]; used.add(i); }
   });
   if (!out.org) lines.forEach((l, i) => {
     if (out.org || used.has(i) || /\d|@/.test(l)) return;
     const t = l.replace(/^[^A-Za-z]+/, '').trim();
-    if (/^[A-Z][A-Za-z]+(?: [A-Z][A-Za-z&.]*){0,3} (Investment|Investments|Capital|Partners|Securities|Holdings|Asset|Advisors|Advisory|Technologies|Technology|Solutions|Systems|Industries|Trading|Logistics|Engineering|Consulting|Financial|Insurance|Group|Corp\.?|Co\.?|Ltd\.?|Inc\.?|LLC)$/.test(t)) { out.org = t; used.add(i); }
+    if (/^[A-Z][A-Za-z]+(?: [A-Z][A-Za-z&.]*){0,3} (Investment|Investments|Capital|Partners|Securities|Holdings|Asset|Advisors|Advisory|Technologies|Technology|Solutions|Systems|Industries|Trading|Logistics|Engineering|Consulting|Financial|Insurance|Group|Corp\.?|Co\.?|Ltd\.?|Inc\.?|LLC)$/i.test(t)) { out.org = t; used.add(i); }
   });
 
   // 이름: 한글 2~4자 단독 줄 → 영문 2~3단어 줄
@@ -326,7 +330,7 @@ function orgFromDomain(email) {
 // 이름 줄 판별: 한글 외 찌꺼기가 3자 이하이고 숫자 덩어리가 없으면, 한글만 뽑아 이름(+직책)으로 본다
 function looseName(l) {
   if (!l) return null;
-  if (/[가-힣]\s*[·.]\s*[가-힣]/.test(l)) return null;              // '수·오·재' 같은 로고 글자
+  if (/[가-힣]\s*[·.|ㅣ]\s*[가-힣]/.test(l)) return null;              // '수·오·재' 같은 로고 글자
   let t = l;
   const bi = l.match(/^[^가-힣A-Za-z]{0,3}((?:[가-힣]\s?){2,4})\s+[A-Za-z]{2,}/); // '박경란 Kyoungran Park'
   if (bi) t = bi[1];
@@ -334,6 +338,7 @@ function looseName(l) {
   if (non.length > 3 || /\d{2}/.test(t)) return null;
   const hangul = t.replace(/[^가-힣]/g, '');
   if (hangul.length < 2 || hangul.length > 8) return null;
+  if (/^쥐/.test(hangul)) return null;                                // (주)가 '쥐'로 읽힌 로고
   if (/(법무법인|주식회사|은행|공사|공단|협회|재단|대학|그룹|센터|본부|사무소|법률|특허)/.test(hangul)) return null;
   return splitNameTitle(hangul);
 }
@@ -358,6 +363,7 @@ const TITLE_LIST = TITLE_WORDS.split('|');
 // 직책으로 보이는 글자를 가장 가까운 직책 단어로 바로잡는다. 너무 다르면 ''.
 function fuzzyTitle(raw) {
   const t = (raw || '').replace(/[^가-힣]/g, '');
+  if (new RegExp('^(?:' + TITLE_WORDS + ')+$').test(t)) return t;
   if (t.length < 2 || t.length > 6) return '';
   let best = '', bd = 99;
   for (const w of TITLE_LIST) { const d = jamoDist(t, w); if (d < bd || (d === bd && w.length > best.length)) { bd = d; best = w; } }
