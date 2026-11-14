@@ -257,5 +257,17 @@
       "email": "kokuma10@naver.com",
       "addr": "경기도 안양시 만안구 시민대로 327번길 11-41 안양창업지원센터 904호"
     }
+  },
+  {
+    "name": "직책 줄 '대표' 아래 이름 줄 우선, 반복되는 로고 줄(유진기술)은 이름 아님",
+    "ocr": "Eugene Technology\n유진기술\n유진기술\n대표\n고병철 (LEO KO)\n경기도 안양시 만안구 시민대로 327번길 11-41 안양창업지원센터 904호\n+82-(0)10-9197-3502\nkokuma10@naver.com",
+    "expect": {
+      "lname": "고",
+      "fname": "병철",
+      "org": "Eugene Technology",
+      "title": "대표",
+      "mobile": "010-9197-3502",
+      "email": "kokuma10@naver.com"
+    }
   }
 ]
