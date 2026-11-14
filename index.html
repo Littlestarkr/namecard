@@ -846,6 +846,58 @@ if (typeof document !== 'undefined') {
     const sx = Math.min(src.width - 10, anchor.x1 + Math.round(h * 0.6));
     const sw = Math.min(src.width - sx, Math.max(h * 14, src.width * 0.4));
     const votes = {};
+    // 1) 글자 하나씩 떼어 읽기: 띄어 쓴 큰 이름('김 시 균')은 한 줄로 읽으면 깨지므로, 이름 줄만 골라 글자 단위로 자른다
+    try {
+      const sy0 = Math.max(0, Math.round(cy - h * 2.2)), sh0 = Math.min(src.height - sy0, Math.round(h * 3.8));
+      if (sw >= 30 && sh0 >= 20) {
+        const c = normCrop(src, sx, sy0, sw, sh0, 1), m = 40, W = c.width, H = c.height;
+        const d = c.getContext('2d').getImageData(0, 0, W, H).data;
+        const dark = (x, y) => d[(y * W + x) * 4] < 120;
+        const runsOf = arr => { const out = []; let st = -1; for (let x = 0; x <= arr.length; x++) { const on = x < arr.length && arr[x] > 0; if (on && st < 0) st = x; else if (!on && st >= 0) { out.push([st, x - 1]); st = -1; } } return out; };
+        // (1) 위아래 전체에서 가장 왼쪽 글자 무리의 가로 범위를 찾는다 (오른쪽 갈색 배경·가장자리는 간격이 커서 제외)
+        const col0 = new Array(W).fill(0);
+        for (let x = m; x < W - m; x++) for (let y = m; y < H - m; y++) if (dark(x, y)) col0[x]++;
+        const r0 = runsOf(col0).filter(r => r[1] >= m && r[0] < W - m);
+        if (r0.length) {
+          const cl = [r0[0][0], r0[0][1]];
+          for (let i = 1; i < r0.length; i++) { if (r0[i][0] - cl[1] <= h * 1.8) cl[1] = r0[i][1]; else break; }
+          // (2) 그 범위만으로 이름 줄(위아래 빈 줄로 구분되는 덩어리) 찾기 — 아래 한자 줄과 분리
+          const rowInk = new Array(H).fill(0);
+          for (let y = m; y < H - m; y++) for (let x = cl[0]; x <= cl[1]; x++) if (dark(x, y)) rowInk[y]++;
+          const rthr = Math.max(2, (cl[1] - cl[0] + 1) * 0.02);
+          let yc = Math.round(cy - sy0) + m;
+          if (rowInk[yc] < rthr) { let best = -1; for (let dy = 1; dy <= h && best < 0; dy++) { if (rowInk[yc - dy] >= rthr) best = yc - dy; else if (rowInk[yc + dy] >= rthr) best = yc + dy; } yc = best; }
+          if (yc > 0) {
+            let by0 = yc, by1 = yc;
+            while (by0 > m && rowInk[by0 - 1] >= rthr) by0--;
+            while (by1 < H - m - 1 && rowInk[by1 + 1] >= rthr) by1++;
+            const bh = by1 - by0 + 1;
+            if (bh >= h * 0.6 && bh <= h * 4) {
+              const colInk = new Array(W).fill(0);
+              for (let x = cl[0]; x <= cl[1]; x++) for (let y = by0; y <= by1; y++) if (dark(x, y)) colInk[x]++;
+              const gapMax = bh * 0.22, merged = [];
+              runsOf(colInk).forEach(r => { const l = merged[merged.length - 1]; if (l && r[0] - l[1] <= gapMax) l[1] = r[1]; else merged.push([r[0], r[1]]); });
+            const glyphs = merged.filter(r => r[1] - r[0] + 1 >= bh * 0.25);
+            if (glyphs.length >= 2 && glyphs.length <= 4) {
+              await worker.setParameters({ tessedit_pageseg_mode: '10' });
+              let name = '';
+              for (const g of glyphs) {
+                const pw = Math.round(bh * 0.2), gx = Math.max(0, g[0] - pw), gw = Math.min(W - gx, g[1] - g[0] + 1 + pw * 2), gy = Math.max(0, by0 - pw), gh = Math.min(H - gy, bh + pw * 2);
+                const sc2 = 130 / gh, o = document.createElement('canvas'); o.width = Math.round(gw * sc2) + 60; o.height = Math.round(gh * sc2) + 60;
+                const og = o.getContext('2d'); og.fillStyle = '#fff'; og.fillRect(0, 0, o.width, o.height); og.drawImage(c, gx, gy, gw, gh, 30, 30, Math.round(gw * sc2), Math.round(gh * sc2));
+                const res = await worker.recognize(o);
+                const ch = ((res.data.text || '').match(/[가-힣]/) || [''])[0];
+                if (!ch) { name = ''; break; }
+                name += ch;
+              }
+              if (name.length === glyphs.length) votes[name] = (votes[name] || 0) + 3 + (SURNAMES.includes(name[0]) ? 1 : 0);
+            }
+            }
+          }
+        }
+      }
+    } catch (e) {} finally { await worker.setParameters({ tessedit_pageseg_mode: '11' }); }
+    // 2) 한 줄 읽기(보조)
     await worker.setParameters({ tessedit_pageseg_mode: '7' });
     try {
       for (const sc of [1.6, 2.2, 3]) {        // 이름 글씨는 직책보다 커서 위아래를 넉넉히
