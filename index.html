@@ -136,7 +136,8 @@ function parseCard(text) {
   // 이메일 / 웹
   lines.forEach((l, i) => {
     const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
-    const m = l.match(re) || l.replace(/\s/g, '').match(re);
+    const l2 = l.replace(/(@[A-Za-z0-9.-]*)\.\s+([A-Za-z]{2,})/g, '$1.$2');
+    const m = l2.match(re) || l.replace(/\s/g, '').match(re);
     if (m && !out.email) { out.email = m[0]; used.add(i); }
   });
   lines.forEach((l, i) => {
@@ -146,12 +147,13 @@ function parseCard(text) {
   });
 
   // 전화번호
-  const numRe = /(\+?82[-.\s]?)?\(?0\d{1,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}/;
+  const numRe = /(\+?82[-.\s]?)?\(?0\d{1,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}|\+82[-.\s]?\(?\d{1,4}\)?[-.\s]\d{3,4}[-.\s]\d{4}/;
   const fixNum = s => s.replace(/[Oo]/g, '0').replace(/[lI|]/g, '1');
   lines.forEach((l, i) => {
     const m = fixNum(l).match(numRe);
     if (!m) return;
-    let num = m[0].replace(/^\+?82[-.\s]?/, '0').replace(/[()]/g, '').replace(/\s+/g, '-').replace(/\.+/g, '-');
+    let num = m[0].replace(/^\+?82[-.\s]?\(?0?/, '0').replace(/[()]/g, '').replace(/\s+/g, '-').replace(/\.+/g, '-');
+    if (out.tel) { const a = out.tel.split('-')[0]; if (a.length === 3 && num.split('-')[0].length === 4 && num.startsWith('0' + a[1] + a.slice(1))) num = a + num.slice(4); }
     const head = l.slice(0, 12).toLowerCase();
     const isFax = /(^|\s)f(ax)?\b|팩스/.test(head) || /^f[\s:.]/i.test(l);
     const isMob = /(^|\s)m(obile)?\b|휴대|핸드폰|mobile|cell/.test(head) || /^01[016789]/.test(num.replace(/-/g, ''));
@@ -180,6 +182,15 @@ function parseCard(text) {
     }
   });
 
+  // 영문 주소: 175-88, Namyangman-ro, Poseung-eup, / Pyeongtaek-si, Gyeonggi-do, Republic of Korea
+  const enAddrRe = /\b[A-Za-z]+-(ro|gil|daero|eup|myeon|si|gun|gu|do)\b|Republic of Korea|\bKorea\b|\b(Road|Street|Avenue|Blvd|Floor)\b/i;
+  if (!out.addr) lines.forEach((l, i) => {
+    if (used.has(i) || out.addr || isContact(l) || !enAddrRe.test(l)) return;
+    let a = take(i), k = i + 1, added = 0;
+    while (added < 2 && lines[k] && !used.has(k) && !isContact(lines[k]) && enAddrRe.test(lines[k])) { a += ' ' + take(k); k++; added++; }
+    out.addr = a.replace(/^[^0-9A-Za-z(]+/, '').replace(/\s+/g, ' ').trim();
+  });
+
   // 이름+직책이 한 줄에 붙은 경우('황의상 부장')
   lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
@@ -188,7 +199,7 @@ function parseCard(text) {
   });
 
   // 직책 / 회사 / 부서
-  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석)/i;
+  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석)/i;
   const orgRe = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|연구원|대학교?|센터|그룹|Inc\.?|Co\.?,?\s*Ltd|Corp|Bank|Group|Company)/i;
   const deptRe = /(본부|팀|부$|실$|지점|지사|과$|센터|사업부|영업|연구소|\bDept|Division|Team)/i;
   lines.forEach((l, i) => {
@@ -208,7 +219,7 @@ function parseCard(text) {
     if (used.has(i)) return;
     if (!out.title && titleRe.test(l) && l.length <= 20) { out.title = take(i); return; }
     if (!out.org && orgRe.test(l)) { out.org = take(i); return; }
-    if (!out.dept && deptRe.test(l) && l.length <= 20) { out.dept = take(i); return; }
+    if (!out.dept && deptRe.test(l) && l.length <= (/[가-힣]/.test(l) ? 20 : 40)) { out.dept = take(i); return; }
   });
 
   // 이름: 한글 2~4자 단독 줄 → 영문 2~3단어 줄
@@ -218,15 +229,28 @@ function parseCard(text) {
     if (nt && !nt.title) { nameLine = nt.name; used.add(i); }
     else if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
   });
+  let enLast = '', enFirst = '';
+  const bad = l => titleRe.test(l) || deptRe.test(l) || orgRe.test(l);
   if (!nameLine) lines.forEach((l, i) => {
-    if (used.has(i) || nameLine) return;
-    if (/^[A-Z][a-z]+(\s[A-Z][a-z]+){1,2}$/.test(l)) { nameLine = l; used.add(i); }
+    if (used.has(i) || nameLine || enLast) return;
+    const t = l.replace(/^[^A-Za-z]+/, '').trim();
+    if (/\d|@/.test(t) || bad(t)) return;
+    let m = t.match(/^([A-Za-z][A-Za-z'.-]+),\s*([A-Za-z][A-Za-z'.-]*(?:\s[A-Za-z][A-Za-z'.-]*){0,2})$/);
+    if (m) { enLast = m[1]; enFirst = m[2]; used.add(i); return; }
+    if (/^[A-Z][a-z]+(-[A-Za-z]+)?(\s[A-Z][a-z]+(-[A-Za-z]+)?){1,2}$/.test(t) || /^[A-Z]{2,}(-[A-Z]+)?(\s[A-Z]{2,}(-[A-Z]+)?){1,2}$/.test(t)) { nameLine = t; used.add(i); }
   });
   if (/[가-힣]/.test(nameLine)) { out.lname = nameLine.slice(0, 1); out.fname = nameLine.slice(1); }
+  else if (enLast) { out.lname = enLast; out.fname = enFirst; }
   else if (nameLine) { const p = nameLine.split(' '); out.fname = p.slice(0, -1).join(' '); out.lname = p[p.length - 1]; }
+  const isEn = !!enLast || (!!nameLine && !/[가-힣]/.test(nameLine));
 
-  if (!out.org && out.email) out.org = orgFromDomain(out.email);
+  if (!out.org && out.email) out.org = isEn ? orgFromDomainEn(out.email) : orgFromDomain(out.email);
+  if (isEn && out.org && /[가-힣]/.test(out.org) && out.email) out.org = orgFromDomainEn(out.email) || out.org;
   out.org = fixOrg(out.org);
+  const cleanField = v => { if (!v) return ''; if (!/[가-힣]/.test(v)) return v.split(/\s+/).every(w => /^([A-Z][a-z]{2,}|[A-Z]{2,5}|&|of|and|the|[A-Z][a-z]+-[A-Z]?[a-z]+)$/.test(w)) ? v : ''; const h = (v.match(/[가-힣]/g) || []).length, e = (v.match(/[A-Za-z]/g) || []).length, o = (v.match(/[^가-힣A-Za-z0-9\s&().-]/g) || []).length; return (h >= 2 && e <= h && o <= 1) ? v : ''; };
+  if (out.dept && !deptRe.test(out.dept)) out.dept = '';
+  out.dept = cleanField(out.dept);
+  if (out.title && !titleRe.test(out.title)) out.title = '';
   return out;
 }
 
@@ -245,6 +269,14 @@ const ORG_DOMAINS = {
   'kexim.go.kr': '한국수출입은행', 'kepco.co.kr': '한국전력공사', 'kotra.co.kr': 'KOTRA',
   'mss.go.kr': '중소벤처기업부', 'motie.go.kr': '산업통상자원부', 'sbc.or.kr': '중소기업중앙회'
 };
+const ORG_EN = { 'ibk.co.kr': 'IBK', 'kogas.or.kr': 'KOGAS', 'ksure.or.kr': 'K-SURE', 'kotra.or.kr': 'KOTRA', 'kotra.co.kr': 'KOTRA', 'kita.net': 'KITA', 'kodit.co.kr': 'KODIT', 'kibo.or.kr': 'KIBO', 'kexim.go.kr': 'KEXIM', 'kepco.co.kr': 'KEPCO' };
+function orgFromDomainEn(email) {
+  const d = (email.split('@')[1] || '').toLowerCase(), parts = d.split('.');
+  for (let i = 0; i < parts.length - 1; i++) { const k = parts.slice(i).join('.'); if (ORG_EN[k]) return ORG_EN[k]; }
+  const lab = parts.length > 2 && /^(co|or|go|ac|ne|re)$/.test(parts[parts.length - 2]) ? parts[parts.length - 3] : parts[parts.length - 2];
+  if (!lab) return '';
+  return lab.length <= 5 ? lab.toUpperCase() : lab[0].toUpperCase() + lab.slice(1);
+}
 function orgFromDomain(email) {
   const d = (email.split('@')[1] || '').toLowerCase();
   const parts = d.split('.');
@@ -328,11 +360,7 @@ function altNames(name) {
     const jong = code % 28;
     (swaps[jong] || []).forEach(j => out.push(name.slice(0, i) + String.fromCharCode(0xAC00 + code - jong + j) + name.slice(i + 1)));
   }
-  const cleanField = v => { if (!v) return ''; const h = (v.match(/[가-힣]/g) || []).length, e = (v.match(/[A-Za-z]/g) || []).length, o = (v.match(/[^가-힣A-Za-z0-9\s&().-]/g) || []).length; return (h >= 2 && e <= h && o <= 1) ? v : ''; };
-  if (out.dept && !deptRe.test(out.dept)) out.dept = '';
-  out.dept = cleanField(out.dept);
-  if (out.title && !titleRe.test(out.title)) out.title = '';
-  return out;
+    return out;
 }
 /* ===== PARSER_END ===== */
 
@@ -657,6 +685,7 @@ if (typeof document !== 'undefined') {
       const r = parseCard(text);
       quiet = true; say('이름 다시 확인 중…'); el('barfill').style.width = '95%';
       try {
+        if (!/[가-힣]/.test((r.lname || '') + (r.fname || ''))) throw new Error('영문 명함');
         const nm = await refineName(worker, src, lines, (r.lname || '') + (r.fname || ''));
         if (nm.best) { r.lname = nm.best.slice(0, 1); r.fname = nm.best.slice(1); }
         if (!r.title && nm.title) r.title = nm.title;
