@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OCR 비교 시험 (Tesseract vs PaddleOCR)</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;padding:14px;background:#f5f6f8;color:#222;font-size:15px}
+  h1{font-size:18px;margin:0 0 4px}
+  .note{color:#555;font-size:13px;margin-bottom:10px}
+  button,label.btn{display:inline-block;background:#2d6cdf;color:#fff;border:0;border-radius:8px;padding:12px 16px;font-size:16px}
+  #log{font-size:12px;color:#666;margin:8px 0;white-space:pre-wrap}
+  img{max-width:100%;border-radius:8px;margin:8px 0}
+  .box{background:#fff;border-radius:10px;padding:10px;margin:10px 0;box-shadow:0 1px 3px #0002}
+  .box h2{font-size:15px;margin:0 0 6px}
+  pre{white-space:pre-wrap;word-break:break-all;margin:0;font-size:14px}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin-top:6px}
+  td,th{border-top:1px solid #eee;padding:4px;text-align:left;vertical-align:top}
+  th{width:22%;color:#777;font-weight:600}
+</style>
+</head>
+<body>
+<h1>OCR 비교 시험</h1>
+<div class="note">사진은 폰 밖으로 나가지 않습니다. (모델·엔진 파일만 내려받음, 최초 1회 약 20MB)</div>
+<label class="btn">명함 사진 선택<input id="f" type="file" accept="image/*" hidden></label>
+<div id="log"></div>
+<img id="pv" hidden>
+<div id="res"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="paddle-bundle.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const log = s => { $('log').textContent = s; };
+let parseCard = null;
+fetch('index.html').then(r => r.text()).then(h => {
+  const a = h.indexOf('/* ===== PARSER_START ====='), b = h.indexOf('/* ===== PARSER_END =====');
+  if (a < 0 || b < 0) return;
+  parseCard = new Function(h.slice(a, b) + '; return parseCard;')();
+}).catch(() => {});
+
+function toCanvas(img, maxSide) {
+  const s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+  c.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, c.width, c.height);
+  return c;
+}
+function esc(s) { return String(s).replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])); }
+function card(title, sec, text, err) {
+  let h = '<div class="box"><h2>' + title + (sec != null ? ' · ' + sec.toFixed(1) + '초' : '') + '</h2>';
+  if (err) { h += '<pre>오류: ' + esc(err) + '</pre></div>'; return h; }
+  if (parseCard) {
+    try {
+      const o = parseCard(text), rows = [['이름', (o.lname || '') + (o.fname || '')], ['회사', o.org], ['부서', o.dept], ['직책', o.title],
+        ['휴대폰', o.mobile], ['전화', o.tel], ['이메일', o.email], ['웹', o.web], ['주소', o.addr]];
+      h += '<table>' + rows.map(r => '<tr><th>' + r[0] + '</th><td>' + esc(r[1] || '') + '</td></tr>').join('') + '</table>';
+    } catch (e) { h += '<div>파서 오류: ' + esc(e.message) + '</div>'; }
+  }
+  h += '<details><summary>원문(OCR 그대로)</summary><pre>' + esc(text) + '</pre></details></div>';
+  return h;
+}
+
+$('f').addEventListener('change', async e => {
+  const file = e.target.files[0]; if (!file) return;
+  const url = URL.createObjectURL(file);
+  $('pv').src = url; $('pv').hidden = false; $('res').innerHTML = '';
+  const img = new Image(); img.src = url; await img.decode();
+  const out = [];
+
+  // 1) PaddleOCR 한국어
+  try {
+    log('PaddleOCR 준비 중… (처음에는 오래 걸립니다)');
+    const t0 = performance.now();
+    await window.PaddleKR.init(log);
+    log('PaddleOCR 인식 중…');
+    const t1 = performance.now();
+    const r = await window.PaddleKR.run(toCanvas(img, 1600), log);
+    const lines = (r.results || r.lines || []).map(x => x.text);
+    out.push(card('PaddleOCR (한국어 PP-OCRv5)', (performance.now() - t1) / 1000, (lines.length ? lines.join('\n') : r.text) || ''));
+  } catch (err) { out.push(card('PaddleOCR (한국어 PP-OCRv5)', null, '', (err && err.message) || String(err))); }
+  $('res').innerHTML = out.join('');
+
+  // 2) Tesseract (기존 앱과 같은 kor+eng, 단일 패스)
+  try {
+    log('Tesseract 인식 중…');
+    const t2 = performance.now();
+    const w = await Tesseract.createWorker('kor+eng', 1);
+    await w.setParameters({ tessedit_pageseg_mode: '6' });
+    const { data } = await w.recognize(toCanvas(img, 1800));
+    await w.terminate();
+    out.push(card('Tesseract (kor+eng, 1회 인식)', (performance.now() - t2) / 1000, data.text || ''));
+  } catch (err) { out.push(card('Tesseract', null, '', (err && err.message) || String(err))); }
+  $('res').innerHTML = out.join('');
+  log('끝. 다른 명함도 선택해 보세요.');
+});
+</script>
+</body>
+</html>
