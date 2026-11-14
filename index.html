@@ -587,6 +587,27 @@ function altNames(name) {
   const score = s => (SURNAMES.includes(s[0]) ? 1 : 0) + [...s].slice(1).filter(c => GIVEN_COMMON.includes(c)).length;
   return combos.filter(c => c.s !== name).sort((x, y) => (score(y.s) - score(x.s)) || (x.ch - y.ch)).slice(0, 8).map(c => c.s);
 }
+/* 같은 사진을 두 번 읽은 이메일이 0/o·1/l 에서만 다를 때: 숫자 옆 글자는 숫자 쪽 표를 따른다(두 읽기가 근거). textB 를 고쳐 돌려준다 */
+function mergeEmailVotes(textA, textB) {
+  const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+  const a = (textA || '').match(re), b = (textB || '').match(re);
+  if (!a || !b || a[0] === b[0]) return textB;
+  const [ua, da] = a[0].split('@'), [ub, db] = b[0].split('@');
+  if (da.toLowerCase() !== db.toLowerCase()) return textB;
+  const n = Math.min(ua.length, ub.length), sa = ua.slice(-n), sb = ub.slice(-n);
+  const pairs = { '0': 'oO', 'o': '0', 'O': '0', '1': 'lI', 'l': '1', 'I': '1' };
+  let out = '', changed = false;
+  for (let i = 0; i < n; i++) {
+    const x = sa[i], y = sb[i];
+    if (x === y) { out += y; continue; }
+    if (!(pairs[x] || '').includes(y)) return textB;          // 0/o·1/l 외 차이는 손대지 않는다
+    const near = [sa[i - 1], sa[i + 1], sb[i - 1], sb[i + 1]].some(c => c && /[0-9]/.test(c));
+    const pick = near ? (/[0-9]/.test(x) ? x : y) : y;        // 숫자 옆이면 숫자 쪽, 아니면 확대해 읽은 쪽(textB)
+    out += /[0-9]/.test(pick) || !near ? pick : (/[0-9]/.test(x) ? x : y); changed = true;
+  }
+  if (!changed) return textB;
+  return textB.replace(ub.slice(-n) + '@' + db, out + '@' + db);
+}
 /* ===== PARSER_END ===== */
 
 /* ===== VISION_START ===== */
@@ -1099,6 +1120,7 @@ if (typeof document !== 'undefined') {
       const res = await window.PaddleKR.run(cv, m => say(m));
       let items = linesOf(res);
       let text = items.map(x => x.text).join('\n') || res.text || '';
+      const text1 = text;
       // 명함이 사진 일부일 때: 글자가 모인 곳만 잘라 크게 다시 읽는다(작은 글씨의 첫·끝 글자 누락 방지)
       try {
         const bx = items.filter(x => x.box && (x.confidence || 0) >= 0.5);
@@ -1118,6 +1140,7 @@ if (typeof document !== 'undefined') {
             const t2 = r2.map(x => x.text).join('\n');
             const n = t => t.replace(/[^가-힣A-Za-z0-9]/g, '').length;
             if (n(t2) >= n(text) * 0.9) { text = t2; items = r2; }
+            try { text = mergeEmailVotes(text1, text); } catch (e) {}
           }
         }
       } catch (e) { console.warn('재인식 건너뜀', e); }

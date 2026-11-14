@@ -5,7 +5,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const a = html.indexOf('/* ===== PARSER_START ====='), b = html.indexOf('/* ===== PARSER_END =====');
 if (a < 0 || b < 0) { console.error('PARSER_START/END 표시를 찾지 못했습니다.'); process.exit(2); }
 const ctx = {}; vm.createContext(ctx);
-vm.runInContext(html.slice(a, b) + '\nthis.parseCard = parseCard; this.cleanAddr = cleanAddr;', ctx);
+vm.runInContext(html.slice(a, b) + '\nthis.parseCard = parseCard; this.cleanAddr = cleanAddr; this.mergeEmailVotes = mergeEmailVotes;', ctx);
 const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'cases.json'), 'utf8'));
 let pass = 0, fail = 0, todo = 0, fixed = 0;
 for (const c of cases) {
@@ -15,5 +15,13 @@ for (const c of cases) {
   if (c.todo) { todo++; console.log('… 알려진 미해결:', c.name, bad.map(([k, v]) => `${k}: 기대 "${v}" / 실제 "${got[k]}"`).join(' | ')); continue; }
   fail++; console.log('✗ 실패:', c.name); bad.forEach(([k, v]) => console.log(`    ${k}: 기대 "${v}" / 실제 "${got[k]}"`));
 }
+// 두 번 읽은 이메일 투표(0/o·1/l)
+const mv = [
+  ['E-mail. ksk0148@hanmail.net', 'ie-mail.ksko148@hanmail.net', 'ie-mail.ksk0148@hanmail.net'],
+  ['bobby1004@gmail.com', 'bobbyl004@gmail.com', 'bobby1004@gmail.com'],
+  ['hello@naver.com', 'hel1o@naver.com', 'hel1o@naver.com'],   // 숫자 옆이 아니면 확대 읽기 쪽을 따름(후보 칩이 보완)
+  ['kim@a.com', 'lee@a.com', 'lee@a.com']
+];
+for (const [A, B, want] of mv) { const got = ctx.mergeEmailVotes(A, B); if (got === want) pass++; else { fail++; console.log('✗ 이메일 투표 실패:', A, B, '기대', want, '실제', got); } }
 console.log(`\n통과 ${pass} · 실패 ${fail} · 알려진 미해결 ${todo}` + (fixed ? ` · 해결됨 ${fixed}` : ''));
 process.exit(fail ? 1 : 0);
