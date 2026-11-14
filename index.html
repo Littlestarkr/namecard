@@ -287,6 +287,7 @@ function parseCard(text) {
 
   if (!out.org && out.email) out.org = isEn ? orgFromDomainEn(out.email) : orgFromDomain(out.email);
   if (isEn && out.org && /[가-힣]/.test(out.org) && out.email) out.org = orgFromDomainEn(out.email) || out.org;
+  if (!out.org && !isEn) out.org = (out.web ? orgFromDomain(out.web) : '') || orgFromText(text);
   out.org = fixOrg(out.org);
   const cleanField = v => { if (!v) return ''; if (!/[가-힣]/.test(v)) return v.split(/\s+/).every(w => /^([A-Z][a-z]{2,}|[A-Z]{2,5}|&|of|and|the|[A-Z][a-z]+-[A-Z]?[a-z]+)$/.test(w)) ? v : ''; const h = (v.match(/[가-힣]/g) || []).length, e = (v.match(/[A-Za-z]/g) || []).length, o = (v.match(/[^가-힣A-Za-z0-9\s&().-]/g) || []).length; return (h >= 2 && e <= h && o <= 1) ? v : ''; };
   if (out.dept && !deptRe.test(out.dept)) out.dept = '';
@@ -321,11 +322,16 @@ function orgFromDomainEn(email) {
   return lab.length <= 5 ? lab.toUpperCase() : lab[0].toUpperCase() + lab.slice(1);
 }
 function orgFromDomain(email) {
-  const d = (email.split('@')[1] || '').toLowerCase();
+  const d = ((email || '').split('@').pop() || '').toLowerCase().replace(/^www\./, '');
   const parts = d.split('.');
   for (let i = 0; i < parts.length - 1; i++) { const k = parts.slice(i).join('.'); if (ORG_DOMAINS[k]) return ORG_DOMAINS[k]; }
+  // OCR이 도메인 한 글자를 잘못 읽은 경우(kibo.or.kr → klbo.or.kr)
+  for (const k of Object.keys(ORG_DOMAINS)) if (k.length >= 8 && lev(d, k) <= 1) return ORG_DOMAINS[k];
   return '';
 }
+// 로고 글자(KIBO 등)가 명함 글자에 섞여 읽힌 경우
+const ORG_TEXT = [[/기술\s*보증\s*기금|\bKIBO\b/i, '기술보증기금'], [/신용\s*보증\s*기금|\bKODIT\b/i, '신용보증기금'], [/무역\s*보험\s*공사|K-?SURE/i, '한국무역보험공사'], [/KOTRA|코트라/, 'KOTRA']];
+function orgFromText(t) { for (const [re, v] of ORG_TEXT) if (re.test(t || '')) return v; return ''; }
 
 // ---- 인식 결과 정리용 도우미 ----
 // 이름 줄 판별: 한글 외 찌꺼기가 3자 이하이고 숫자 덩어리가 없으면, 한글만 뽑아 이름(+직책)으로 본다
@@ -438,17 +444,36 @@ function fixOrg(org) {
   }
   return o.replace(/^IBK(?=[가-힣])/, 'IBK');
 }
-// 이름 후보: 받침이 비슷하게 읽히는 글자(ㅁ↔ㅂ 등)를 한 글자씩 바꿔 본 목록
+// 이름 후보: OCR이 흔히 틀리는 모양(받침 빠짐·ㅗ/ㅜ 혼동·받침 ㅁ/ㅂ/ㅇ 혼동)을 글자별로 바꿔 보고,
+// 흔한 성·이름 글자로 이뤄진 후보를 앞에 둔다. (예: '기겨소' → '김경수')
+const SURNAMES = '김이박최정강조윤장임한오서신권황안송류유홍전고문양손배백허남심노하곽성차주우구민나';
+const GIVEN_COMMON = '경수민준지영현진성정우호철훈석동재혁종규상기승환태형원희은미숙순자란선아연주';
+function syllVariants(ch) {
+  const code = ch.charCodeAt(0) - 0xAC00;
+  if (code < 0 || code > 11171) return [ch];
+  const ini = Math.floor(code / 588), vow = Math.floor((code % 588) / 28), jong = code % 28;
+  const mk = (v, j) => String.fromCharCode(0xAC00 + ini * 588 + v * 28 + j);
+  const out = new Set([ch]);
+  const vs = { 8: [13], 13: [8], 4: [6, 8], 6: [4], 0: [2], 2: [0], 12: [8], 17: [13] }[vow] || [];
+  const sw = { 16: [17, 21], 17: [16], 21: [16, 4], 4: [8, 21], 8: [4], 1: [24], 24: [1] }[jong] || [];
+  [vow, ...vs].forEach(v => {
+    if (jong === 0) { [0, 1, 4, 8, 16, 17, 21].forEach(j => out.add(mk(v, j))); }
+    else { out.add(mk(v, jong)); out.add(mk(v, 0)); sw.forEach(j => out.add(mk(v, j))); }
+  });
+  return [...out];
+}
 function altNames(name) {
-  const swaps = { 16:[17,21], 17:[16], 21:[16,4], 4:[8,21], 8:[4], 1:[24], 24:[1] };
-  const out = [];
-  for (let i = 0; i < name.length; i++) {
-    const code = name.charCodeAt(i) - 0xAC00;
-    if (code < 0 || code > 11171) continue;
-    const jong = code % 28;
-    (swaps[jong] || []).forEach(j => out.push(name.slice(0, i) + String.fromCharCode(0xAC00 + code - jong + j) + name.slice(i + 1)));
-  }
-    return out;
+  const chars = [...(name || '')].slice(0, 5);
+  if (!chars.length) return [];
+  const per = chars.map((c, i) => (i === 0 && chars.length >= 2) ? syllVariants(c).filter(v => v === c || SURNAMES.includes(v)) : syllVariants(c));
+  let combos = [{ s: '', ch: 0 }];
+  per.forEach((vs, i) => {
+    const nx = [];
+    combos.forEach(p => vs.forEach(v => { const ch = p.ch + (v === chars[i] ? 0 : 1); if (ch <= 3) nx.push({ s: p.s + v, ch }); }));
+    combos = nx;
+  });
+  const score = s => (SURNAMES.includes(s[0]) ? 1 : 0) + [...s].slice(1).filter(c => GIVEN_COMMON.includes(c)).length;
+  return combos.filter(c => c.s !== name).sort((x, y) => (score(y.s) - score(x.s)) || (x.ch - y.ch)).slice(0, 8).map(c => c.s);
 }
 /* ===== PARSER_END ===== */
 
@@ -729,7 +754,8 @@ if (typeof document !== 'undefined') {
     title = fuzzyTitle(title) || '';
     const ranked = Object.keys(votes).sort((x, y) => votes[y] - votes[x]);
     const best = ranked[0] || current || '';
-    const alts = [...ranked.slice(1), ...altNames(best)].filter((v, i, a) => v !== best && a.indexOf(v) === i).slice(0, 6);
+    const gen = altNames(best);
+    const alts = [...gen.slice(0, 4), ...ranked.slice(1), ...gen.slice(4)].filter((v, i, a) => v !== best && a.indexOf(v) === i).slice(0, 8);
     return { best, alts, title };
   }
 
@@ -862,6 +888,7 @@ if (typeof document !== 'undefined') {
       } catch (e) {}
       if (!r.dept) { try { say('부서 다시 확인 중…'); r.dept = await findDept(worker, src, lines); } catch (e) {} }
       if (r.email) { try { say('이메일 다시 확인 중…'); r.email = await refineEmail(worker, src, lines, r.email); } catch (e) {} }
+      if (!r.org && r.email) r.org = /[가-힣]/.test((r.lname || '') + (r.fname || '')) ? orgFromDomain(r.email) : orgFromDomainEn(r.email);
       el('raw').value = text;
       IDS.forEach(k => { if (r[k]) el(k).value = r[k]; });
       el('barfill').style.width = '100%';
