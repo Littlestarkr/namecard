@@ -244,7 +244,7 @@ function parseCard(text) {
   });
 
   // 직책 / 회사 / 부서
-  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석|파트너(?![스즈])|변호사|변리사|법무사|노무사|감정평가사|경영지도사|기술지도사|관세사|공인중개사)|\b(CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|Attorney|Partner|Counsel|Lawyer)\b/i;
+  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석|파트너(?![스즈])|변호사|변리사|법무사|노무사|감정평가사|경영지도사|기술지도사|관세사|공인중개사|[가-힣]{1,3}학박사)|\b(CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|Attorney|Partner|Counsel|Lawyer)\b/i;
   const orgRe = /(파트너스|파트너즈|컨설팅|컴퍼니|법인|사무소|주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|연구원|대학교?|센터|그룹|\bInc\b\.?|Co\.?,?\s*Ltd|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i;
   const deptRe = /(본부|팀|부$|실$|지점|지사|과$|센터|사업부|영업|연구소|\bDept|Division|Team)/i;
   lines.forEach((l, i) => {
@@ -338,7 +338,7 @@ function parseCard(text) {
 }
 
 // 직책 단어(긴 것부터)와 '이름+직책' 분리: '황의상부장' → {name:'황의상', title:'부장'}
-const TITLE_WORDS = '경영지도사|기술지도사|관세사|파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
+const TITLE_WORDS = '경영학박사|경제학박사|무역학박사|행정학박사|정치학박사|사회학박사|교육학박사|공학박사|법학박사|이학박사|의학박사|문학박사|신학박사|경영지도사|기술지도사|관세사|파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
 function splitNameTitle(t) {
   const pm = (t || '').match(/^(대표이사|대표|부회장|회장|부사장|사장)([가-힣]{2,4})$/);   // '대표김시균', '대표잘과'
   if (pm) return (pm[2].length >= 3 && isTitleLike(pm[2])) ? null : { name: pm[2], title: pm[1] };   // '대표커설턴트'는 이름이 아님
@@ -399,7 +399,9 @@ function keepTitles(raw) {
     .map(t => pure.test(t) ? t : (t.length >= 2 ? fuzzyTitle(t) : '')).filter(Boolean)
     .flatMap(t => pure.test(t) ? (t.match(new RegExp(TITLE_WORDS, 'g')) || [t]) : [t]))
     .map(ws => [...new Set(ws)].join(' ')).filter(Boolean);
-  const uniq = [...new Set(groups)];
+  // 자격(박사·지도사·세무사 등)은 직책 뒤로: '경영학박사/대표이사' → '대표이사 / 경영학박사'
+  const isQual = g => /박사|지도사|관세사|공인회계사|공인노무사|감정평가사|변리사|세무사|법무사|노무사|건축사/.test(g);
+  const uniq = [...new Set(groups)]; uniq.sort((a, b) => (isQual(a) ? 1 : 0) - (isQual(b) ? 1 : 0));
   if (uniq.length) return uniq.join(' / ');
   const tw = base.match(new RegExp(TITLE_WORDS));
   return tw ? tw[0] : (base || raw);

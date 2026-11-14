@@ -187,5 +187,14 @@
     "expect": {
       "email": "bobby1004@gmail.com"
     }
+  },
+  {
+    "name": "학위 자격이 직책 앞에 적힘(경영학박사/대표이사 → 직책 먼저)",
+    "ocr": "(주)스타벤처스\n문지은 Bobby Moon\n경영학박사/대표이사\n경기도 성남시 수정구 대왕판교로 815\nP.010-6312-5667\nE.bobby1004@gmail.com",
+    "expect": {
+      "title": "대표이사 / 경영학박사",
+      "lname": "문",
+      "fname": "지은"
+    }
   }
 ]
