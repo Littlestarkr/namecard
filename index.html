@@ -777,15 +777,14 @@ if (typeof document !== 'undefined') {
       // 블록 모드(6)는 줄이 끊기지 않아 이름·웹주소가 온전히 읽히고, 흩어진 글자 모드(11)는 로고·작은 글씨에 강하다
       const modes = [['color', '6'], ['adaptive', '11'], ['color', '11'], ['invert', '11']];
       let pass = 0, quiet = true;
-      worker = await Tesseract.createWorker('kor+eng', 1, {
-        logger: m => {
-          if (quiet) return;
-          if (m.status === 'recognizing text') {
-            const pct = Math.round(((pass + m.progress) / modes.length) * 90);
-            el('barfill').style.width = pct + '%'; say('글자 읽는 중… ' + pct + '%');
-          } else if (m.status && m.status.includes('loading')) say('인식 데이터 불러오는 중… (처음 한 번만 오래 걸립니다)');
-        }
-      });
+      curLog = m => {
+        if (quiet) return;
+        if (m.status === 'recognizing text') {
+          const pct = Math.round(((pass + m.progress) / modes.length) * 90);
+          el('barfill').style.width = pct + '%'; say('글자 읽는 중… ' + pct + '%');
+        } else if (m.status && m.status.includes('loading')) say('인식 데이터 불러오는 중… (처음 한 번만 오래 걸립니다)');
+      };
+      worker = await getWorker();
       // 11: 명함처럼 흩어진 글자를 찾는 모드
       await worker.setParameters({ tessedit_pageseg_mode: '11', preserve_interword_spaces: '1' });
       say('글자 방향 확인 중…');
@@ -845,7 +844,7 @@ if (typeof document !== 'undefined') {
       say('완료! 이름·회사는 비슷한 글자로 잘못 읽힐 수 있으니 꼭 확인하세요.');
       el('f').scrollIntoView({ behavior: 'smooth' });
     } catch (e) { say('인식에 실패했습니다: ' + e.message); }
-    finally { if (worker) { try { await worker.terminate(); } catch (e) {} } }
+    finally { curLog = () => {}; idleStop(); }
   }
 
   // ---- 사진 손질 화면: 방향 돌리기 · 모서리 맞추기 → 적용을 눌러야 글자를 읽는다 ----
@@ -939,11 +938,21 @@ if (typeof document !== 'undefined') {
   el('rotr').addEventListener('click', () => { edRot = (edRot + 90) % 360; edFine = 0; el('tilt').value = 0; el('tiltv').textContent = '0°'; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); autoTilt(); });
   el('orig').addEventListener('click', () => { edBase = edOrig; edRot = 0; edFine = 0; el('tilt').value = 0; el('tiltv').textContent = '0°'; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); });
   // 글자가 모인 곳을 찾아 점선 상자의 위치(비율)를 돌려준다
+  let sharedW = null, curLog = () => {}, idleT = null;
+  async function getWorker() {
+    clearTimeout(idleT);
+    if (!sharedW) sharedW = Tesseract.createWorker('kor+eng', 1, { logger: m => curLog(m) });
+    try { return await sharedW; } catch (e) { sharedW = null; throw e; }
+  }
+  function idleStop() { // 한 번 띄운 인식 엔진은 재사용하고, 2분 안 쓰면 메모리 반환
+    clearTimeout(idleT);
+    idleT = setTimeout(async () => { const w = sharedW; sharedW = null; try { if (w) (await w).terminate(); } catch (e) {} }, 120000);
+  }
   async function locateBox(cv) {
-    const w = await Tesseract.createWorker('kor+eng', 1, {});
+    const w = await getWorker();
     try {
       await w.setParameters({ tessedit_pageseg_mode: '11' });
-      const k = Math.min(1, 1600 / Math.max(cv.width, cv.height));
+      const k = Math.min(1, 1000 / Math.max(cv.width, cv.height));
       const sm = document.createElement('canvas'); sm.width = Math.round(cv.width * k); sm.height = Math.round(cv.height * k);
       sm.getContext('2d').drawImage(cv, 0, 0, sm.width, sm.height);
       const rr = await w.recognize(await variant(sm, 'color'));
@@ -985,7 +994,7 @@ if (typeof document !== 'undefined') {
         }
       } catch (e) {}
       return { x: X0 / sm.width, y: Y0 / sm.height, w: (X1 - X0) / sm.width, h: (Y1 - Y0) / sm.height };
-    } finally { try { await w.terminate(); } catch (e) {} }
+    } finally { idleStop(); }
   }
   el('autoc').addEventListener('click', async () => {
     if (typeof Tesseract === 'undefined') { say('글자 인식 모듈을 불러오지 못했습니다.'); return; }
