@@ -102,6 +102,7 @@
     </div>
     <label class="f" for="fax">팩스</label><input type="tel" id="fax">
     <label class="f" for="email">이메일</label><input type="email" id="email">
+    <div id="emalts" style="margin-top:2px;font-size:13px;color:#5a6275"></div>
     <label class="f" for="web">웹사이트</label><input type="text" id="web">
     <label class="f" for="addr">주소</label><input type="text" id="addr">
 
@@ -149,7 +150,7 @@ function parseCard(text) {
   // 이메일 / 웹
   lines.forEach((l, i) => {
     const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
-    const l2 = l.replace(/(@[A-Za-z0-9.-]*)\.\s+([A-Za-z]{2,})/g, '$1.$2').replace(/([A-Za-z0-9]{2,})\.\s+([A-Za-z0-9]+@)/g, '$1.$2');
+    const l2 = l.replace(/\b(?:e-?mail|email)\s*:\s*|\b(?:e-?mail|email)\.\s+/ig, ' ').replace(/(@[A-Za-z0-9.-]*)\.\s+([A-Za-z]{2,})/g, '$1.$2').replace(/([A-Za-z0-9]{2,})\.\s+([A-Za-z0-9]+@)/g, '$1.$2');
     const m = l2.match(re) || l.replace(/\s/g, '').match(re);
     if (m && !out.email) { out.email = m[0].replace(/-(com|net|org|kr)$/i, '.$1'); used.add(i); }
   });
@@ -241,7 +242,7 @@ function parseCard(text) {
   });
 
   // 직책 / 회사 / 부서
-  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석|파트너|변호사|변리사|법무사|노무사|감정평가사|Attorney|Partner|Counsel|Lawyer)/i;
+  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석|파트너|변호사|변리사|법무사|노무사|감정평가사)|\b(CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|Attorney|Partner|Counsel|Lawyer)\b/i;
   const orgRe = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|연구원|대학교?|센터|그룹|\bInc\b\.?|Co\.?,?\s*Ltd|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i;
   const deptRe = /(본부|팀|부$|실$|지점|지사|과$|센터|사업부|영업|연구소|\bDept|Division|Team)/i;
   lines.forEach((l, i) => {
@@ -267,6 +268,11 @@ function parseCard(text) {
     if (!out.dept && deptRe.test(l) && l.length <= (/[가-힣]/.test(l) ? 20 : 40)) { out.dept = take(i); return; }
   });
 
+  // 한글&한글 로고 줄('주남&금강 FR')은 회사명
+  if (!out.org) lines.forEach((l, i) => {
+    if (out.org || used.has(i) || /@|\d{3,}/.test(l)) return;
+    if (/[가-힣]+\s*&\s*[가-힣]+/.test(l)) { out.org = l.replace(/^[^가-힣A-Za-z]+/, '').trim(); used.add(i); }
+  });
   // 회사명을 못 찾았을 때: 로고 줄('유니베스트 …')의 한글 앞부분 → 영문 회사명 줄('UniBest Investment')
   if (!out.org) lines.forEach((l, i) => {
     if (out.org || used.has(i) || addrRe.test(l) || deptRe.test(l) || titleRe.test(l) || /\d|@/.test(l)) return;
@@ -323,7 +329,9 @@ function parseCard(text) {
 const TITLE_WORDS = '파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
 function splitNameTitle(t) {
   const m = (t || '').match(new RegExp('^([가-힣]{2,4}?)(' + TITLE_WORDS + ')?$'));
-  return m ? { name: m[1], title: m[2] || '' } : null;
+  if (m && !(m[2] === undefined && new RegExp('^(' + TITLE_WORDS + ')$').test(m[1]))) return { name: m[1], title: m[2] || '' };
+  const m2 = (t || '').match(new RegExp('^(' + TITLE_WORDS + ')([가-힣]{2,4})$'));      // '대표김시균'
+  return m2 ? { name: m2[2], title: m2[1] } : null;
 }
 // 이메일 도메인으로 회사명 추정 (로고 글자를 못 읽었을 때의 보조)
 const ORG_DOMAINS = {
@@ -354,7 +362,7 @@ function orgFromDomain(email) {
 function fixWeb(web, email) {
   let w = (web || '').replace(/[.,]+$/, '');
   if (/\.(or|co|go|ac|ne|re)$/i.test(w)) w += '.kr';
-  if (!w && email && /@/.test(email)) { const d = email.split('@')[1]; if (/\.(or|co|go|ac)\.kr$|\.(com|net|kr)$/i.test(d)) w = 'www.' + d; }
+  if (!w && email && /@/.test(email)) { const d = email.split('@')[1]; if (/^(gmail|naver|hanmail|daum|nate|kakao|hotmail|outlook|yahoo|icloud|live|msn|korea|dreamwiz|empal|paran)\./i.test(d)) return w; if (/\.(or|co|go|ac)\.kr$|\.(com|net|kr)$/i.test(d)) w = 'www.' + d; }
   return w;
 }
 // 회사명 맞추기: 이메일·웹·로고 글자로 알아낸 기관명이 있고, 읽은 회사명이 비슷하거나 비었으면 그것으로 바꾼다 ('술보증기금' → '기술보증기금')
@@ -853,6 +861,31 @@ if (typeof document !== 'undefined') {
     } finally { await worker.setParameters({ tessedit_pageseg_mode: '11' }); }
     return best;
   }
+  // 이메일 아이디의 헷갈리는 글자(o↔0, l↔1)를 숫자 옆에서만 바꾼 후보를 칩으로 보여 준다
+  function emailAlts(email) {
+    const [u, d] = (email || '').split('@'); if (!d) return [];
+    const out = new Set(), sw = { o: '0', O: '0', 0: 'o', l: '1', I: '1', 1: 'l' };
+    for (let i = 0; i < u.length; i++) {
+      const c = u[i]; if (!(c in sw)) continue;
+      const nb = (u[i - 1] || '') + (u[i + 1] || '');
+      if (/\d/.test(nb) || (c === '0' && /[a-z]/i.test(nb))) out.add(u.slice(0, i) + sw[c] + u.slice(i + 1) + '@' + d);
+    }
+    // 숫자 덩어리 바로 앞의 o·l은 숫자일 가능성이 높아 한꺼번에 바꾼 후보도 추가
+    const t = u.replace(/[oO](?=\d)/g, '0').replace(/[l](?=\d)/g, '1');
+    if (t !== u) out.add(t + '@' + d);
+    out.delete(email);
+    return [...out].slice(0, 4);
+  }
+  function showEmailAlts(email) {
+    const box = el('emalts'); box.innerHTML = '';
+    const a = emailAlts(email); if (!a.length) return;
+    box.append('0/o 확인: ');
+    a.forEach(n => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = n;
+      b.addEventListener('click', () => { el('email').value = n; });
+      box.appendChild(b);
+    });
+  }
   function showAlts(alts) {
     const box = el('alts'); box.innerHTML = '';
     if (!alts.length) return;
@@ -868,7 +901,7 @@ if (typeof document !== 'undefined') {
     if (!srcIn) return;
     if (typeof Tesseract === 'undefined') { say('글자 인식 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요.'); return; }
     el('bar').style.display = 'block'; el('barfill').style.width = '3%';
-    say('사진 준비 중…'); el('alts').innerHTML = '';
+    say('사진 준비 중…'); el('alts').innerHTML = ''; if (el('emalts')) el('emalts').innerHTML = '';
     let worker;
     try {
       let src = srcIn;
@@ -940,6 +973,7 @@ if (typeof document !== 'undefined') {
       if (/[가-힣]/.test((r.lname || '') + (r.fname || ''))) r.org = reconcileOrg(r.org, r.email, r.web, text); else if (!r.org && r.email) r.org = orgFromDomainEn(r.email);
       el('raw').value = text;
       IDS.forEach(k => { if (r[k]) el(k).value = r[k]; });
+      try { showEmailAlts(r.email); } catch (e) {}
       el('barfill').style.width = '100%';
       say('완료! 이름·회사는 비슷한 글자로 잘못 읽힐 수 있으니 꼭 확인하세요.');
       el('f').scrollIntoView({ behavior: 'smooth' });
@@ -1007,7 +1041,7 @@ if (typeof document !== 'undefined') {
     if (!file) return;
     loadCanvas(file).then(c => {
       edOrig = c; edBase = c; edRot = 0; edFine = 0; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 };
-      el('preview').style.display = 'none'; el('alts').innerHTML = '';
+      el('preview').style.display = 'none'; el('alts').innerHTML = ''; if (el('emalts')) el('emalts').innerHTML = '';
       el('ed').style.display = 'block'; edDraw();
       if (!autoTilt()) say('방향을 맞추고 명함만 남게 모서리를 조정한 뒤 “적용”을 누르세요.');
       el('ed').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1166,7 +1200,7 @@ if (typeof document !== 'undefined') {
   el('reset').addEventListener('click', () => {
     const cur = getCard();
     if (hasName(cur)) { queue.push(cur); saveQueue(); }
-    IDS.forEach(k => el(k).value = ''); el('raw').value = ''; el('alts').innerHTML = '';
+    IDS.forEach(k => el(k).value = ''); el('raw').value = ''; el('alts').innerHTML = ''; if (el('emalts')) el('emalts').innerHTML = '';
     el('preview').style.display = 'none'; el('bar').style.display = 'none';
     el('cam').value = ''; el('gal').value = '';
     renderQueue();
@@ -1179,7 +1213,7 @@ if (typeof document !== 'undefined') {
     const cur = getCard();
     const filled = IDS.some(k => cur[k]) || el('preview').style.display === 'block';
     if (filled && !confirm('지금 명함의 입력 내용과 사진을 지울까요? (담아 둔 명함은 그대로 남습니다)')) return;
-    IDS.forEach(k => el(k).value = ''); el('raw').value = ''; el('alts').innerHTML = '';
+    IDS.forEach(k => el(k).value = ''); el('raw').value = ''; el('alts').innerHTML = ''; if (el('emalts')) el('emalts').innerHTML = '';
     el('preview').style.display = 'none'; el('bar').style.display = 'none';
     el('cam').value = ''; el('gal').value = '';
     renderQueue();
