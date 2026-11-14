@@ -196,5 +196,12 @@
       "lname": "문",
       "fname": "지은"
     }
+  },
+  {
+    "name": "라벨 앞에 글자 찌꺼기(ie-mail.ksk0148@…)",
+    "ocr": "주남&금강 FR\nFactory Rent\n대표\n김시균\nMobile.010-8838-5535 ie-mail.ksk0148@hanmail.net",
+    "expect": {
+      "email": "ksk0148@hanmail.net"
+    }
   }
 ]
