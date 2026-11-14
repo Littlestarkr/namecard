@@ -159,5 +159,12 @@
       "lname": "박",
       "fname": "민수"
     }
+  },
+  {
+    "name": "이메일 라벨이 공백 없이 붙음(Paddle: E-mail.ksk0148@…)",
+    "ocr": "주남&금강 FR\nFactory Rent\n대표\n김시균\n경기도 부천시 내동 104-1 주남빌딩 5층\nTel.032-683-5535 Fax.032-679-5535\nMobile.010-8838-5535 E-mail.ksk0148@hanmail.net",
+    "expect": {
+      "email": "ksk0148@hanmail.net"
+    }
   }
 ]
