@@ -166,5 +166,12 @@
     "expect": {
       "email": "ksk0148@hanmail.net"
     }
+  },
+  {
+    "name": "포털 주소 한 글자 누락(naver.om → naver.com)",
+    "ocr": "케이스퀘어 파트너스\n임계영 / 대표 컨설턴트\n경영지도사\n010-4582-1845\nvinoo1@naver.om",
+    "expect": {
+      "email": "vinoo1@naver.com"
+    }
   }
 ]
