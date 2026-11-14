@@ -254,6 +254,7 @@ function parseCard(text) {
     if (parts.length > 1) {
       parts.forEach(p => {
         if (!nameLine && /^[가-힣]{2,4}$/.test(p.trim()) && !new RegExp('^(' + TITLE_WORDS + ')+$').test(p.trim()) && !titleRe.test(p) && !orgRe.test(p) && !deptRe.test(p)) { nameLine = p.trim(); return; }
+        { const h = p.replace(/[^가-힣]/g, ''); if (out.title && h && new RegExp('^(?:' + TITLE_WORDS + ')+$').test(h)) { if (!out.title.replace(/[^가-힣]/g, '').includes(h)) out.title += ' / ' + p.trim(); return; } }   // 직책이 이미 있으면 뒤 직책·자격명은 ' / '로 덧붙임
         const strongOrg = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|대학교?|그룹|\bInc\b|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i.test(p);
         if (!out.title && titleRe.test(p) && !strongOrg && !deptRe.test(p)) out.title = p;
         else if (!out.org && /연구소$/.test(p.trim()) && !/(팀|본부|사업부)/.test(p)) out.org = p.trim();
@@ -325,6 +326,12 @@ function parseCard(text) {
   if (out.dept && !deptRe.test(out.dept)) out.dept = '';
   out.dept = cleanField(out.dept);
   if (out.title && !titleRe.test(out.title)) out.title = '';
+  // 직책 아래 따로 적힌 자격명 줄('경영지도사')은 직책 뒤에 ' / '로 덧붙인다
+  if (out.title) lines.forEach((l, i) => {
+    if (used.has(i)) return;
+    const h = l.replace(/[^가-힣]/g, '');
+    if (h && new RegExp('^(?:' + TITLE_WORDS + ')+$').test(h) && !out.title.replace(/[^가-힣]/g, '').includes(h)) { out.title += ' / ' + h; used.add(i); }
+  });
   if (out.title && /[가-힣]/.test(out.title)) { out.title = keepTitles(out.title); }
   if (!out.org) { const lm = text.match(/법무법인\s*[가-힣]{2,6}/); if (lm) out.org = lm[0].replace(/\s+/g, ' '); }
   return out;
@@ -386,10 +393,13 @@ function reconcileOrg(org, email, web, text) {
 function keepTitles(raw) {
   const base = (raw || '').replace(/\s*[A-Za-z].*$/, '').trim();
   const pure = new RegExp('^(?:' + TITLE_WORDS + ')+$');
-  const toks = base.split(/[\s\/|·,]+/).map(t => t.replace(/[^가-힣]/g, '')).filter(Boolean)
+  // '/ | · ,' 로 나뉜 묶음은 유지하고(' / '로 이음), 묶음 안의 직책 단어는 공백으로 잇는다
+  const groups = base.split(/\s*[\/|·,]\s*/).map(g => g.split(/\s+/).map(t => t.replace(/[^가-힣]/g, '')).filter(Boolean)
     .map(t => pure.test(t) ? t : (t.length >= 2 ? fuzzyTitle(t) : '')).filter(Boolean)
-    .flatMap(t => pure.test(t) ? (t.match(new RegExp(TITLE_WORDS, 'g')) || [t]) : [t]);   // '대표컨설턴트' → 대표, 컨설턴트
-  if (toks.length) return [...new Set(toks)].join(' ');
+    .flatMap(t => pure.test(t) ? (t.match(new RegExp(TITLE_WORDS, 'g')) || [t]) : [t]))
+    .map(ws => [...new Set(ws)].join(' ')).filter(Boolean);
+  const uniq = [...new Set(groups)];
+  if (uniq.length) return uniq.join(' / ');
   const tw = base.match(new RegExp(TITLE_WORDS));
   return tw ? tw[0] : (base || raw);
 }
@@ -434,6 +444,7 @@ function orgFromText(t) { for (const [re, v] of ORG_TEXT) if (re.test(t || '')) 
 function looseName(l) {
   if (!l) return null;
   if (/[&@]/.test(l)) return null;                                      // '주남&금강 FR' 같은 로고 줄
+  if (/[\/|ㅣ]/.test(l)) return null;                                      // '이름 / 직책' 구분자 줄은 구분자 줄 처리(parts)에서 나눠 담는다
   if (/(^|\s)[가-힣]\s*[·.|ㅣ]\s*[가-힣](?=\s|$|[·.|ㅣ])/.test(l)) return null;   // '수·오·재' 같은 낱글자 로고
   let t = l;
   const bi = l.match(/^[^가-힣A-Za-z]{0,3}((?:[가-힣]\s?){2,4})\s+[A-Za-z]{2,}/); // '박경란 Kyoungran Park'
