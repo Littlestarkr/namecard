@@ -295,7 +295,7 @@ function parseCard(text) {
     else if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
   });
   let enLast = '', enFirst = '';
-  const bad = l => titleRe.test(l) || deptRe.test(l) || orgRe.test(l);
+  const bad = l => titleRe.test(l) || deptRe.test(l) || orgRe.test(l) || /\b(Factory|Rent|Rental|Trading|Industr\w*|Service\w*|Solution\w*|System\w*|Tech\w*|Company|Engineering|Logistics|Leasing|Design|Shop|Store)\b/i.test(l);
   if (!nameLine) lines.forEach((l, i) => {
     if (used.has(i) || nameLine || enLast) return;
     const t = l.replace(/^[^A-Za-z]+/, '').trim();
@@ -786,7 +786,7 @@ if (typeof document !== 'undefined') {
   }
   async function refineName(worker, src, lines, current) {
     const nt = t => looseName(t);
-    const cands = lines.filter(l => l.bbox && (l.confidence || 0) >= 35 && nt(l.text));
+    const cands = lines.filter(l => l.bbox && (l.confidence || 0) >= 35 && nt(l.text) && (!current || jamoDist(nt(l.text).name, current) <= Math.max(3, current.length * 2)));
     const votes = {}; let title = '';
     if (current) votes[current] = 1;
     if (cands.length) {
@@ -827,6 +827,45 @@ if (typeof document !== 'undefined') {
   }
 
   // 이메일: 줄만 크게 잘라 여러 번 다시 읽고 가장 많이 나온 결과를 택한다(i/l/j 같은 글자 혼동 줄이기)
+  // 이름을 못 읽었을 때: '대표' 같은 직책 단어를 찾아 그 오른쪽(같은 줄의 큰 글씨)을 잘라 다시 읽는다 ('대 표   김 시 균')
+  async function recoverNameNearTitle(worker, src, lines) {
+    const tre = new RegExp('^(' + TITLE_WORDS + ')$'), han = t => (t || '').replace(/[^가-힣]/g, '');
+    let anchor = null;
+    for (const l of lines) {
+      if (!l.bbox) continue;
+      if (tre.test(han(l.text)) && (l.confidence || 0) >= 20) { anchor = l.bbox; break; }
+      const ws = l.words || [];
+      for (let i = 0; i < ws.length && !anchor; i++) {
+        if (tre.test(han(ws[i].text))) anchor = ws[i].bbox;
+        else if (i + 1 < ws.length && tre.test(han(ws[i].text) + han(ws[i + 1].text))) anchor = { x0: ws[i].bbox.x0, x1: ws[i + 1].bbox.x1, y0: Math.min(ws[i].bbox.y0, ws[i + 1].bbox.y0), y1: Math.max(ws[i].bbox.y1, ws[i + 1].bbox.y1) };
+      }
+      if (anchor) break;
+    }
+    if (!anchor) return null;
+    const h = Math.max(12, anchor.y1 - anchor.y0), cy = (anchor.y0 + anchor.y1) / 2;
+    const sx = Math.min(src.width - 10, anchor.x1 + Math.round(h * 0.6));
+    const sw = Math.min(src.width - sx, Math.max(h * 14, src.width * 0.4));
+    const votes = {};
+    await worker.setParameters({ tessedit_pageseg_mode: '7' });
+    try {
+      for (const sc of [1.6, 2.2, 3]) {        // 이름 글씨는 직책보다 커서 위아래를 넉넉히
+        const sh = Math.round(h * sc), sy = Math.max(0, Math.round(cy - sh * 0.62));
+        const hh = Math.min(src.height - sy, sh);
+        if (sw < 30 || hh < 12) continue;
+        for (const [psm, kk] of [['7', 110 / hh], ['13', 110 / hh], ['7', 160 / hh]]) {
+          await worker.setParameters({ tessedit_pageseg_mode: psm });
+          const res = await worker.recognize(normCrop(src, sx, sy, sw, hh, kk));
+          const r = looseName(res.data.text);
+          if (r && !r.title) votes[r.name] = (votes[r.name] || 0) + 1 + (SURNAMES.includes(r.name[0]) ? 0.5 : 0);
+        }
+      }
+    } finally { await worker.setParameters({ tessedit_pageseg_mode: '11' }); }
+    const ranked = Object.keys(votes).sort((x, y) => votes[y] - votes[x]);
+    if (!ranked.length) return null;
+    const best = ranked[0];
+    const alts = [...ranked.slice(1), ...altNames(best)].filter((v, i, a) => v !== best && a.indexOf(v) === i).slice(0, 8);
+    return { best, alts };
+  }
   async function refineEmail(worker, src, lines, current) {
     const rx = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
     const cands = lines.filter(l => l.bbox && /@/.test(l.text || '') && (l.confidence || 0) >= 30)
@@ -985,6 +1024,11 @@ if (typeof document !== 'undefined') {
       const r = parseCard(text);
       quiet = true; say('이름 다시 확인 중…'); el('barfill').style.width = '95%';
       try {
+        if (!/[가-힣]/.test((r.lname || '') + (r.fname || '')) && /[가-힣]/.test(r.title || '')) {   // 한글 직책은 있는데 한글 이름이 없는 경우
+          say('이름 찾는 중…');
+          const rc = await recoverNameNearTitle(worker, src, lines);
+          if (rc) { r.lname = rc.best.slice(0, 1); r.fname = rc.best.slice(1); showAlts(rc.alts); }
+        }
         if (!/[가-힣]/.test((r.lname || '') + (r.fname || ''))) throw new Error('영문 명함');
         const nm = await refineName(worker, src, lines, (r.lname || '') + (r.fname || ''));
         if (nm.best) { r.lname = nm.best.slice(0, 1); r.fname = nm.best.slice(1); }
