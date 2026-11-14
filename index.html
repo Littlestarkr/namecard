@@ -172,6 +172,7 @@ function parseCard(text) {
       any = true;
       let num = m[0].replace(/^\+?82[-.\s]?\(?0?/, '0').replace(/[()]/g, '').replace(/\s+/g, '-').replace(/\.+/g, '-').replace(/-{2,}/g, '-');
       const dg = num.replace(/\D/g, '');
+      num = fmtKrPhone(dg) || num;   // 공백이 빠져 읽혀도 자릿수 규칙으로 하이픈을 다시 넣는다
       if ([out.tel, out.fax, out.mobile].some(v => v && v.replace(/\D/g, '') === dg)) continue;
       if (out.tel) { const a = out.tel.split('-')[0]; if (a.length === 3 && num.split('-')[0].length === 4 && num.startsWith('0' + a[1] + a.slice(1))) num = a + num.slice(4); }
       const before = fl.slice(Math.max(0, m.index - 10), m.index);
@@ -429,7 +430,16 @@ function cleanAddr(a) {
     .replace(/\s[\^~|_`]+(?=\s|$)/g, ' ')
     .replace(/[\s^~|_`'"°•·,;:]+$/, '')
     .replace(/([가-힣])(로|길)(\d)/g, '$1$2 $3')
+    .replace(/,(?=\S)/g, ', ')
     .replace(/\s+/g, ' ').trim();
+}
+// 국내 전화번호 자릿수 규칙: 02-xxx(x)-xxxx · 01x/0xx-xxx(x)-xxxx · 050x-xxx(x)-xxxx. 맞지 않으면 null(원래 값 유지)
+function fmtKrPhone(dg) {
+  let m;
+  if ((m = dg.match(/^(02)(\d{3,4})(\d{4})$/))) return m[1] + '-' + m[2] + '-' + m[3];
+  if ((m = dg.match(/^(050\d)(\d{3,4})(\d{4})$/))) return m[1] + '-' + m[2] + '-' + m[3];
+  if ((m = dg.match(/^(0\d{2})(\d{3,4})(\d{4})$/))) return m[1] + '-' + m[2] + '-' + m[3];
+  return null;
 }
 function fixEmail(e) {
   if (!e || !e.includes('@')) return e;
