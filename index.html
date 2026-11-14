@@ -733,6 +733,29 @@ if (typeof document !== 'undefined') {
     return { best, alts, title };
   }
 
+  // 이메일: 줄만 크게 잘라 여러 번 다시 읽고 가장 많이 나온 결과를 택한다(i/l/j 같은 글자 혼동 줄이기)
+  async function refineEmail(worker, src, lines, current) {
+    const rx = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
+    const cands = lines.filter(l => l.bbox && /@/.test(l.text || '') && (l.confidence || 0) >= 30)
+      .sort((x, y) => (y.confidence || 0) - (x.confidence || 0));
+    if (!cands.length) return current;
+    const b = cands[0].bbox, h = Math.max(10, b.y1 - b.y0), pad = Math.round(h * 0.2);
+    const sx = Math.max(0, b.x0 - pad), sy = Math.max(0, b.y0 - pad);
+    const sw = Math.min(src.width - sx, b.x1 - b.x0 + pad * 2 + h * 2), sh = Math.min(src.height - sy, h + pad * 2);
+    const votes = {}, add = t => { const m = (t || '').replace(/\s+/g, '').match(rx); if (m) { const e = m[0].toLowerCase(); votes[e] = (votes[e] || 0) + 1; return e; } return ''; };
+    if (current) votes[current.toLowerCase()] = 0.5;
+    let last = '';
+    const k = 90 / h;
+    for (const [psm, kk] of [['7', k], ['7', k * 1.4], ['6', k], ['13', k]]) {
+      await worker.setParameters({ tessedit_pageseg_mode: psm });
+      const res = await worker.recognize(normCrop(src, sx, sy, sw, sh, kk));
+      last = add(res.data.text) || last;
+    }
+    await worker.setParameters({ tessedit_pageseg_mode: '11' });
+    const ranked = Object.keys(votes).sort((x, y) => votes[y] - votes[x]);
+    return ranked[0] || current;
+  }
+
   // 부서를 못 읽었을 때: 직책(영문) 또는 이름 줄 바로 아래를 크게 잘라 다시 읽는다
   async function findDept(worker, src, lines) {
     const ok = lines.filter(l => l.bbox && (l.confidence || 0) >= 40);
@@ -838,6 +861,7 @@ if (typeof document !== 'undefined') {
         showAlts(nm.alts);
       } catch (e) {}
       if (!r.dept) { try { say('부서 다시 확인 중…'); r.dept = await findDept(worker, src, lines); } catch (e) {} }
+      if (r.email) { try { say('이메일 다시 확인 중…'); r.email = await refineEmail(worker, src, lines, r.email); } catch (e) {} }
       el('raw').value = text;
       IDS.forEach(k => { if (r[k]) el(k).value = r[k]; });
       el('barfill').style.width = '100%';
