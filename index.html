@@ -83,7 +83,14 @@
     <img id="preview" alt="명함 미리보기">
     <div class="bar" id="bar"><i id="barfill"></i></div>
     <div class="status" id="status">명함을 찍거나 고르면 먼저 방향·영역을 손질하는 화면이 나옵니다.</div>
-    <div class="hint">처음 한 번은 한글 인식 데이터(약 수 MB)를 내려받아 시간이 걸립니다. 사진은 서버로 전송되지 않고 폰 안에서만 처리됩니다.</div>
+    <div class="hint" id="privacy"></div>
+    <details id="aiset">
+      <summary>AI 인식 설정</summary>
+      <div class="hint">중계 서버(Cloudflare Worker) 주소를 넣으면 Claude AI로 훨씬 정확하게 읽습니다. 비워 두면 기존 방식(폰 안에서만 처리)을 씁니다.</div>
+      <input type="url" id="aiurl" placeholder="https://namecard-ai.○○○.workers.dev" style="margin-top:8px">
+      <div class="edrow"><button type="button" id="aisave">저장</button><button type="button" id="aitest">연결 시험</button></div>
+      <div class="status" id="aimsg"></div>
+    </details>
   </div>
 
   <form class="card" id="f" autocomplete="off" onsubmit="return false">
@@ -1012,11 +1019,67 @@ if (typeof document !== 'undefined') {
     });
     return { x0, y0, x1, y1 };
   }
+  function refreshPrivacy() {
+    el('privacy').textContent = getAiUrl()
+      ? 'AI 인식 사용 중: 명함 사진이 인식을 위해 Anthropic(Claude) 서버로 전송됩니다. 실패하면 폰 안에서만 처리하는 기본 인식으로 바뀝니다.'
+      : '처음 한 번은 한글 인식 데이터(약 수 MB)를 내려받아 시간이 걸립니다. 사진은 서버로 전송되지 않고 폰 안에서만 처리됩니다.';
+  }
+  el('aiurl').value = getAiUrl();
+  refreshPrivacy();
+  el('aisave').addEventListener('click', () => {
+    const u = el('aiurl').value.trim();
+    if (u && !/^https:\/\//.test(u)) { say('https:// 로 시작하는 주소를 넣어 주세요.', 'aimsg'); return; }
+    try { if (u) localStorage.setItem(AIKEY, u); else localStorage.removeItem(AIKEY); } catch (e) {}
+    refreshPrivacy(); say(u ? '저장했습니다. 이제 AI로 읽습니다.' : 'AI 설정을 지웠습니다. 기본 인식을 씁니다.', 'aimsg');
+  });
+  el('aitest').addEventListener('click', async () => {
+    const u = el('aiurl').value.trim(); if (!u) { say('주소를 먼저 넣어 주세요.', 'aimsg'); return; }
+    say('확인 중…', 'aimsg');
+    try { const j = await aiPost(u, { ping: true }); say(j && j.ok ? '연결 성공 (모델: ' + (j.model || '?') + ')' : '응답이 이상합니다.', 'aimsg'); }
+    catch (e) { say('연결 실패: ' + e.message, 'aimsg'); }
+  });
+  // ---- AI(Claude 비전) 인식: 중계 서버(Cloudflare Worker) 주소가 설정돼 있으면 이쪽을 먼저 쓴다 ----
+  const AIKEY = 'namecard-ai-endpoint';
+  const getAiUrl = () => { let u = ''; try { u = localStorage.getItem(AIKEY) || ''; } catch (e) {} return (u || window.NAMECARD_AI_ENDPOINT || '').trim(); };
+  function aiCanvasB64(src) {
+    const k = Math.min(1, 1600 / Math.max(src.width, src.height));
+    const c = document.createElement('canvas'); c.width = Math.round(src.width * k); c.height = Math.round(src.height * k);
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(src, 0, 0, c.width, c.height);
+    return { c, b64: c.toDataURL('image/jpeg', 0.85).split(',')[1] };
+  }
+  async function aiPost(url, payload) {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 45000);
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctl.signal });
+      if (!res.ok) throw new Error('서버 응답 ' + res.status);
+      return await res.json();
+    } catch (e) { throw new Error(e.name === 'AbortError' ? '시간 초과' : e.message); }
+    finally { clearTimeout(t); }
+  }
+  async function handleAI(srcIn) {
+    const url = getAiUrl(); if (!url) return false;
+    try {
+      el('bar').style.display = 'block'; el('barfill').style.width = '30%';
+      say('AI가 명함을 읽는 중…');
+      const { c, b64 } = aiCanvasB64(srcIn);
+      try { el('preview').src = c.toDataURL('image/jpeg', 0.8); el('preview').style.display = 'block'; } catch (e) {}
+      const j = await aiPost(url, { image: b64, media_type: 'image/jpeg' });
+      if (!j || typeof j.card !== 'object' || !j.card) throw new Error('응답 형식 오류');
+      IDS.forEach(k => { const v = j.card[k]; if (v != null && String(v).trim()) el(k).value = String(v).trim(); });
+      el('raw').value = '(AI 인식 결과)\n' + JSON.stringify(j.card, null, 1);
+      el('barfill').style.width = '100%';
+      say('완료! AI가 읽은 결과입니다. 그래도 이름·이메일은 한 번 확인하세요.');
+      el('f').scrollIntoView({ behavior: 'smooth' });
+      return true;
+    } catch (e) { say('AI 인식 실패(' + e.message + ') — 기본 인식으로 다시 시도합니다…'); return false; }
+  }
   async function handle(srcIn) {
     if (!srcIn) return;
+    el('alts').innerHTML = ''; if (el('emalts')) el('emalts').innerHTML = '';
+    if (await handleAI(srcIn)) return;
     if (typeof Tesseract === 'undefined') { say('글자 인식 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요.'); return; }
     el('bar').style.display = 'block'; el('barfill').style.width = '3%';
-    say('사진 준비 중…'); el('alts').innerHTML = ''; if (el('emalts')) el('emalts').innerHTML = '';
+    say('사진 준비 중…');
     let worker;
     try {
       let src = srcIn;

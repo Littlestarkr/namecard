@@ -1,0 +1,7 @@
+name = "namecard-ai"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://littlestarkr.github.io"
+MODEL = "claude-sonnet-5-5"
