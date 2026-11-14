@@ -338,6 +338,41 @@ function mergeLines(passes) {
   return out.join('\n');
 }
 
+// ---- 부서 다시 읽기용 도우미 (직책/이름 줄 바로 아래의 작은 회색 글씨) ----
+const EN_TITLE_RE = /Manager|Director|President|Engineer|Officer|Executive|Chief|Head|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Professor|Researcher|Analyst|Supervisor|CEO|CTO|CFO/i;
+const EN_DEPT_WORDS = ['Division','Department','Team','Office','Center','Centre','Headquarters','Group','Section','Branch','Planning','Management','Maintenance','Operations','Terminal','Mechanical','Electrical','Marketing','Research','Development','Strategy','Finance','Business','Sales','Technology','Engineering','Support','Service','Services','Overseas','International','Global','Trade','Insurance','Credit'];
+function lev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+function fixEnWord(w) {
+  if (w.length < 5) return w;
+  let best = w, bd = 3;
+  for (const k of EN_DEPT_WORDS) { const d = lev(w.toLowerCase(), k.toLowerCase()); if (d < bd && Math.abs(k.length - w.length) <= 2) { bd = d; best = k; } }
+  return bd <= 2 ? best : w;
+}
+function pickDept(text) {
+  const en = [], ko = [];
+  (text || '').split(/\r?\n/).forEach(raw => {
+    const l = raw.replace(/^[^가-힣A-Za-z]+|[^가-힣A-Za-z)]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (!l || /\d|@/.test(l)) return;
+    if (/[가-힣]/.test(l)) {
+      const c = l.replace(/\s/g, ''), h = (c.match(/[가-힣]/g) || []).length;
+      if (h >= 3 && h >= c.length * 0.8 && /(본부|팀|부|실|지점|지사|과|센터|사업부|영업|연구소)$/.test(c)) ko.push(l);
+      return;
+    }
+    const w = l.split(' ').map(fixEnWord);
+    if (w.length < 2 || !w.every(x => /^([A-Z][a-z]{2,}|[A-Z]{2,5}|&|of|and|the|for)$/.test(x))) return;
+    if (/\b(Team|Division|Department|Dept|Office|Center|Centre|Group|Section|Branch|Headquarters|Unit|Lab)\b/.test(w.join(' '))) en.push(w.join(' '));
+  });
+  if (ko.length) return ko.join(' ');
+  en.sort((a, b) => (/Division|Department|Headquarters|Group/.test(b) ? 1 : 0) - (/Division|Department|Headquarters|Group/.test(a) ? 1 : 0));
+  return en.join(', ');
+}
+
 // 회사명 보정: 로고 글자(IBK 등)가 깨져 읽힌 경우 + 자주 쓰는 기관명 사전
 function fixOrg(org) {
   if (!org) return org;
@@ -638,6 +673,29 @@ if (typeof document !== 'undefined') {
     const alts = [...ranked.slice(1), ...altNames(best)].filter((v, i, a) => v !== best && a.indexOf(v) === i).slice(0, 6);
     return { best, alts, title };
   }
+
+  // 부서를 못 읽었을 때: 직책(영문) 또는 이름 줄 바로 아래를 크게 잘라 다시 읽는다
+  async function findDept(worker, src, lines) {
+    const ok = lines.filter(l => l.bbox && (l.confidence || 0) >= 40);
+    const a = ok.filter(l => EN_TITLE_RE.test(l.text) && !/\d|@/.test(l.text))
+      .sort((x, y) => (y.confidence || 0) - (x.confidence || 0))[0]
+      || ok.filter(l => looseName(l.text)).sort((x, y) => ((y.bbox.y1 - y.bbox.y0) * y.confidence) - ((x.bbox.y1 - x.bbox.y0) * x.confidence))[0];
+    if (!a) return '';
+    const b = a.bbox, h = Math.max(10, b.y1 - b.y0), w = b.x1 - b.x0;
+    const sx = Math.max(0, b.x0 - Math.round(h * 0.3)), sy = Math.min(src.height - 20, b.y1 + Math.round(h * 0.1));
+    const sw = Math.min(src.width - sx, Math.round(Math.max(w * 1.55, h * 8))), sh = Math.min(src.height - sy, Math.round(h * 1.9));
+    if (sw < 40 || sh < 20) return '';
+    await worker.setParameters({ tessedit_pageseg_mode: '6' });
+    let best = '';
+    try {
+      for (const k of [200 / sh, 280 / sh]) {
+        const res = await worker.recognize(normCrop(src, sx, sy, sw, sh, k));
+        const d = pickDept(res.data.text);
+        if (d.length > best.length) best = d;
+      }
+    } finally { await worker.setParameters({ tessedit_pageseg_mode: '11' }); }
+    return best;
+  }
   function showAlts(alts) {
     const box = el('alts'); box.innerHTML = '';
     if (!alts.length) return;
@@ -691,6 +749,7 @@ if (typeof document !== 'undefined') {
         if (!r.title && nm.title) r.title = nm.title;
         showAlts(nm.alts);
       } catch (e) {}
+      if (!r.dept) { try { say('부서 다시 확인 중…'); r.dept = await findDept(worker, src, lines); } catch (e) {} }
       el('raw').value = text;
       IDS.forEach(k => { if (r[k]) el(k).value = r[k]; });
       el('barfill').style.width = '100%';
