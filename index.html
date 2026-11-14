@@ -170,7 +170,7 @@ function parseCard(text) {
       if (out.tel) { const a = out.tel.split('-')[0]; if (a.length === 3 && num.split('-')[0].length === 4 && num.startsWith('0' + a[1] + a.slice(1))) num = a + num.slice(4); }
       const before = fl.slice(Math.max(0, m.index - 10), m.index);
       let lab = '';
-      const w = before.match(/(Tel|Fax|Mobile|Cell|Phone|전화|팩스|휴대폰?|핸드폰|직통)\s*[:.]?\s*$/i);
+      const w = before.match(/(Tel|Fax|Mobile|Cell|Phone|Dir|Direct|전화|팩스|휴대폰?|핸드폰|직통)\.?\s*[:.]?\s*$/i);
       if (w) lab = /fax|팩스/i.test(w[1]) ? 'F' : /mobile|cell|휴대|핸드폰/i.test(w[1]) ? 'M' : 'T';
       else { const c = before.match(/(?:^|[^A-Za-z])([TFMtfm£])\s*[:.]?\s*$/); if (c) lab = c[1] === '£' ? 'F' : c[1].toUpperCase(); }
       const isMob = lab === 'M' || (!lab && /^01[016789]/.test(num.replace(/-/g, '')));
@@ -218,7 +218,7 @@ function parseCard(text) {
 
   // 직책 / 회사 / 부서
   const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석|파트너|변호사|변리사|법무사|노무사|감정평가사|Attorney|Partner|Counsel|Lawyer)/i;
-  const orgRe = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|연구원|대학교?|센터|그룹|Inc\.?|Co\.?,?\s*Ltd|Corp|Bank|Group|Company)/i;
+  const orgRe = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|연구원|대학교?|센터|그룹|\bInc\b\.?|Co\.?,?\s*Ltd|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i;
   const deptRe = /(본부|팀|부$|실$|지점|지사|과$|센터|사업부|영업|연구소|\bDept|Division|Team)/i;
   lines.forEach((l, i) => {
     if (used.has(i)) return;
@@ -238,6 +238,18 @@ function parseCard(text) {
     if (!out.title && titleRe.test(l) && l.length <= 20) { out.title = take(i); return; }
     if (!out.org && orgRe.test(l)) { out.org = take(i); return; }
     if (!out.dept && deptRe.test(l) && l.length <= (/[가-힣]/.test(l) ? 20 : 40)) { out.dept = take(i); return; }
+  });
+
+  // 회사명을 못 찾았을 때: 로고 줄('유니베스트 …')의 한글 앞부분 → 영문 회사명 줄('UniBest Investment')
+  if (!out.org) lines.forEach((l, i) => {
+    if (out.org || used.has(i) || addrRe.test(l) || deptRe.test(l) || titleRe.test(l) || /\d|@/.test(l)) return;
+    const m = l.match(/^[^가-힣]{0,3}([가-힣]{3,8})(?:\s|$|\()/);
+    if (m && !looseName(l)) { out.org = m[1]; used.add(i); }
+  });
+  if (!out.org) lines.forEach((l, i) => {
+    if (out.org || used.has(i) || /\d|@/.test(l)) return;
+    const t = l.replace(/^[^A-Za-z]+/, '').trim();
+    if (/^[A-Z][A-Za-z]+(?: [A-Z][A-Za-z&.]*){0,3} (Investment|Investments|Capital|Partners|Securities|Holdings|Asset|Advisors|Advisory|Technologies|Technology|Solutions|Systems|Industries|Trading|Logistics|Engineering|Consulting|Financial|Insurance|Group|Corp\.?|Co\.?|Ltd\.?|Inc\.?|LLC)$/.test(t)) { out.org = t; used.add(i); }
   });
 
   // 이름: 한글 2~4자 단독 줄 → 영문 2~3단어 줄
@@ -789,6 +801,8 @@ if (typeof document !== 'undefined') {
           }
         }
       } catch (e) {}
+      // 남은 기울기가 있으면 마지막으로 한 번 더 바로잡는다 (자른 뒤라 배경 영향이 적어 정확함)
+      try { const z = estimateSkew(src); if (Math.abs(z) >= 0.8) src = rotateFine(src, z); } catch (e) {}
       try { el('preview').src = src.toDataURL('image/jpeg', 0.8); el('preview').style.display = 'block'; } catch (e) {}
       quiet = false;
       const passes = [], lines = [];
