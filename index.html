@@ -154,7 +154,7 @@ function parseCard(text) {
     const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
     const l2 = l.replace(/\b(?:e-?mail|email)\s*:\s*|\b(?:e-?mail|email)\.\s+/ig, ' ').replace(/(@[A-Za-z0-9.-]*)\.\s+([A-Za-z]{2,})/g, '$1.$2').replace(/([A-Za-z0-9]{2,})\.\s+([A-Za-z0-9]+@)/g, '$1.$2');
     const m = l2.match(re) || l.replace(/\s/g, '').match(re);
-    if (m && !out.email) { out.email = m[0].replace(/^.{0,3}?(?:e-?mail|email)[.:]+(?=[A-Za-z0-9])/i, '').replace(/^[A-Z][.:]+(?=[a-z0-9])/, '').replace(/^[._%+-]+/, '').replace(/-(com|net|org|kr)$/i, '.$1'); used.add(i); }
+    if (m && !out.email) { out.email = m[0].replace(/^.{0,3}?(?:e-?mail|email)[.:]+(?=[A-Za-z0-9])/i, '').replace(/\.{2,}/g, '.').replace(/^[A-Z][.:]+(?=[a-z0-9])/, '').replace(/^[._%+-]+/, '').replace(/-(com|net|org|kr)$/i, '.$1'); used.add(i); }
   });
   lines.forEach((l, i) => {
     if (out.web) return;
@@ -605,8 +605,12 @@ function mergeEmailVotes(textA, textB) {
   const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
   const a = (textA || '').match(re), b = (textB || '').match(re);
   if (!a || !b || a[0] === b[0]) return textB;
-  const [ua, da] = a[0].split('@'), [ub, db] = b[0].split('@');
+  const strip = u => u.replace(/^.{0,3}?(?:e-?mail|email)[.:]+(?=[A-Za-z0-9])/i, '').replace(/^[A-Z][.:]+(?=[a-z0-9])/, '');
+  const [ra, da0] = a[0].split('@'), [rb, db0] = b[0].split('@');
+  const ua = strip(ra), ub = strip(rb), da = da0.replace(/\.{2,}/g, '.'), db = db0.replace(/\.{2,}/g, '.');
   if (da.toLowerCase() !== db.toLowerCase()) return textB;
+  // 한쪽 읽기에서 앞 글자가 빠진 경우(작은 글씨 첫머리): 다른 쪽이 그 글자로 끝나는 더 긴 값이면 긴 쪽을 따른다
+  if (ua.length > ub.length && ua.toLowerCase().endsWith(ub.toLowerCase())) return textB.replace(b[0], ua + '@' + db);
   const n = Math.min(ua.length, ub.length), sa = ua.slice(-n), sb = ub.slice(-n);
   const pairs = { '0': 'oO', 'o': '0', 'O': '0', '1': 'lI', 'l': '1', 'I': '1' };
   let out = '', changed = false;

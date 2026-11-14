@@ -20,7 +20,9 @@ const mv = [
   ['E-mail. ksk0148@hanmail.net', 'ie-mail.ksko148@hanmail.net', 'ie-mail.ksk0148@hanmail.net'],
   ['bobby1004@gmail.com', 'bobbyl004@gmail.com', 'bobby1004@gmail.com'],
   ['hello@naver.com', 'hel1o@naver.com', 'hel1o@naver.com'],   // 숫자 옆이 아니면 확대 읽기 쪽을 따름(후보 칩이 보완)
-  ['kim@a.com', 'lee@a.com', 'lee@a.com']
+  ['kim@a.com', 'lee@a.com', 'lee@a.com'],
+  ['happyhome2115@daum.net', 'ppyhome2115@daum..net', 'happyhome2115@daum.net'],   // 한쪽에서 앞 글자 누락
+  ['ppyhome2115@daum.net', 'happyhome2115@daum.net', 'happyhome2115@daum.net']
 ];
 for (const [A, B, want] of mv) { const got = ctx.mergeEmailVotes(A, B); if (got === want) pass++; else { fail++; console.log('✗ 이메일 투표 실패:', A, B, '기대', want, '실제', got); } }
 console.log(`\n통과 ${pass} · 실패 ${fail} · 알려진 미해결 ${todo}` + (fixed ? ` · 해결됨 ${fixed}` : ''));
