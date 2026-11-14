@@ -170,7 +170,7 @@ function parseCard(text) {
   const numG = /(\+?82[-.\s]?)?\(?0\d{1,3}\)?[-.\s]{0,2}\d{3,4}[-.\s]{0,2}\d{4}|\+82[-.\s]?\(?\d{1,4}\)?[-.\s]\d{3,4}[-.\s]\d{4}/g;
   const fixNum = s => s.replace(/[Oo]/g, '0').replace(/[lI|]/g, '1');
   lines.forEach((l, i) => {
-    const fl = fixNum(l); let m, any = false; numG.lastIndex = 0;
+    const fl = fixNum(l).replace(/(\+82[-.\s]?)\(0\)/g, '$10'); let m, any = false; numG.lastIndex = 0;
     while ((m = numG.exec(fl))) {
       any = true;
       let num = m[0].replace(/^\+?82[-.\s]?\(?0?/, '0').replace(/[()]/g, '').replace(/\s+/g, '-').replace(/\.+/g, '-').replace(/-{2,}/g, '-');
@@ -223,7 +223,7 @@ function parseCard(text) {
     if (addrRe.test(l) && /\d/.test(l)) {
       let a = take(i), k = i + 1, added = 0;
       // 다음 줄이 주소의 이어지는 부분이면 최대 2줄까지 붙인다
-      while (added < 2 && lines[k] && !used.has(k) && !isContact(lines[k]) && (/^\(.+\)$/.test(lines[k]) || addrMore.test(lines[k]))) { a += ' ' + take(k); k++; added++; }
+      while (added < 2 && lines[k] && !used.has(k) && !isContact(lines[k]) && (/^\(.+\)$/.test(lines[k]) || (addrMore.test(lines[k]) && /[가-힣]/.test(lines[k])))) { a += ' ' + take(k); k++; added++; }
       // 앞에 붙은 아이콘 찌꺼기(©, ®, @ 등) 제거
       out.addr = a.replace(/^[^0-9가-힣A-Za-z(]+/, '').replace(/^(?:[A-Z]{2,}\s+)+(?=[가-힣])/, '').replace(/^[가-힣\s]{2,12}\s*[:：]\s*/, '').replace(/\s+/g, ' ').trim();
       out.addr = cleanAddr(out.addr);
@@ -468,6 +468,7 @@ function orgFromText(t) { for (const [re, v] of ORG_TEXT) if (re.test(t || '')) 
 // 이름 줄 판별: 한글 외 찌꺼기가 3자 이하이고 숫자 덩어리가 없으면, 한글만 뽑아 이름(+직책)으로 본다
 function looseName(l) {
   if (!l) return null;
+  l = l.replace(/\s*[(（][^)）]*[A-Za-z][^)）]*[)）]?\s*$/, '');                // '대표 고병철 (LEO KO)' 끝의 영문 병기 괄호는 떼고 판단
   if (/[&@]/.test(l)) return null;                                      // '주남&금강 FR' 같은 로고 줄
   if (/[\/|ㅣ]/.test(l)) return null;                                      // '이름 / 직책' 구분자 줄은 구분자 줄 처리(parts)에서 나눠 담는다
   if (/(^|\s)[가-힣]\s*[·.|ㅣ]\s*[가-힣](?=\s|$|[·.|ㅣ])/.test(l)) return null;   // '수·오·재' 같은 낱글자 로고
@@ -1128,7 +1129,8 @@ if (typeof document !== 'undefined') {
     if (!paddleLoad) paddleLoad = new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'paddle-bundle.js'; s.onload = ok; s.onerror = () => { paddleLoad = null; no(new Error('엔진 로드 실패')); }; document.head.appendChild(s); });
     return paddleLoad;
   }
-  async function handlePaddle(src) {
+  async function handlePaddle(srcIn0) {
+    let src = srcIn0;
     const t0 = performance.now();
     try {
       say('글자 인식 준비 중… (처음 한 번은 오래 걸립니다)'); el('barfill').style.width = '10%';
@@ -1142,9 +1144,31 @@ if (typeof document !== 'undefined') {
         return { c, k };
       };
       const linesOf = res => (res.results || res.lines || []).filter(x => x && x.text);
-      const { c: cv, k } = scaled(src, 1600);
-      const res = await window.PaddleKR.run(cv, m => say(m));
+      let { c: cv, k } = scaled(src, 1280);
+      let res = await window.PaddleKR.run(cv, m => say(m));
       let items = linesOf(res);
+      // 세로로 찍힌(옆으로 누운) 명함: 글자 상자가 대부분 세로로 길면 90°/270°로 돌려 읽고 더 잘 읽힌 쪽을 쓴다. 거꾸로면 180°도 한 번 시도
+      const qual = it => it.reduce((a, x) => a + (x.confidence || 0) * (x.text || '').replace(/[^가-힣A-Za-z0-9]/g, '').length, 0);
+      const vertFrac = it => { const b = it.filter(x => x.box); return b.length ? b.filter(x => x.box.height > x.box.width * 1.2).length / b.length : 0; };
+      const avgConf = it => it.length ? it.reduce((a, x) => a + (x.confidence || 0), 0) / it.length : 0;
+      const tryRot = async deg => {
+        const rs = rotateCanvas(src, deg), sc = scaled(rs, 1280);
+        const rr = await window.PaddleKR.run(sc.c, m => say(m));
+        return { deg, rs, sc, rr, it: linesOf(rr) };
+      };
+      try {
+        const vf = vertFrac(items);
+        let cands = [];
+        if (items.length >= 3 && vf >= 0.5) { say('세로 명함 방향 맞추는 중…'); el('barfill').style.width = '50%'; cands = [90, 270]; }
+        else if (items.length >= 3 && avgConf(items) < 0.6) { say('글자 방향 확인 중…'); cands = [180]; }
+        let best = { deg: 0, it: items, q: qual(items) * (vf >= 0.5 ? 0.5 : 1), rs: src, sc: { c: cv, k }, rr: res };
+        for (const d of cands) {
+          const t = await tryRot(d), q = qual(t.it);
+          if (q > best.q * 1.15) best = { deg: d, it: t.it, q, rs: t.rs, sc: t.sc, rr: t.rr };
+          if (d === 90 && vertFrac(t.it) < 0.3 && avgConf(t.it) >= 0.7) break;   // 90°로 충분히 잘 읽히면 270°는 건너뜀
+        }
+        if (best.deg) { src = best.rs; cv = best.sc.c; k = best.sc.k; res = best.rr; items = best.it; }
+      } catch (e) { console.warn('방향 보정 건너뜀', e); }
       let text = items.map(x => x.text).join('\n') || res.text || '';
       const text1 = text;
       // 명함이 사진 일부일 때: 글자가 모인 곳만 잘라 크게 다시 읽는다(작은 글씨의 첫·끝 글자 누락 방지)
@@ -1158,7 +1182,7 @@ if (typeof document !== 'undefined') {
             const m = Math.max(x1 - x0, y1 - y0) * 0.08 + 10;
             const cx = Math.max(0, Math.round((x0 - m) / k)), cy = Math.max(0, Math.round((y0 - m) / k));
             const cw = Math.min(src.width - cx, Math.round((x1 - x0 + 2 * m) / k)), ch = Math.min(src.height - cy, Math.round((y1 - y0 + 2 * m) / k));
-            const nc = document.createElement('canvas'), s2 = Math.min(2.5, 1800 / Math.max(cw, ch));
+            const nc = document.createElement('canvas'), s2 = Math.min(2.5, 1500 / Math.max(cw, ch));
             nc.width = Math.round(cw * s2); nc.height = Math.round(ch * s2);
             const g = nc.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#fff'; g.fillRect(0, 0, nc.width, nc.height);
             g.drawImage(src, cx, cy, cw, ch, 0, 0, nc.width, nc.height);
