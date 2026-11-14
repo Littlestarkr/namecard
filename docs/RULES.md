@@ -103,3 +103,9 @@
 | Gemini 무료 등급 | 무료 | 무료 등급 약관상 입력이 모델 개선에 쓰일 수 있음(확인 필요), 타인 개인정보 문제 |
 
 **2026-11-14 결정: 현재 방식 유지.** 본 문서의 규칙으로 후처리를 일원화한다. (AI 중계 구현은 커밋 `517e4ae`에 있고 `4a9321e`로 되돌렸다. 필요하면 `git show 517e4ae`로 복원 가능.)
+
+## 엔진 결정 갱신 (2026-11-14)
+- 작가님 폰 시험(paddle-test.html, 여러 장)에서 PaddleOCR 한국어(PP-OCRv5 mobile)가 Tesseract보다 이름·회사·직책이 정확하고 빨랐다(예: 3.0초 vs 8.4초).
+- 본 앱 기본 엔진을 PaddleOCR로 바꾸고, 로딩·인식 실패 시 기존 Tesseract 경로로 자동 전환한다. 사진은 계속 폰 안에서만 처리(모델·엔진 파일만 내려받음, 최초 약 20MB, 서비스워커 `ocrmodels-v1` 캐시에 보관).
+- Paddle 경로는 Tesseract 전용 보정(refineName·refineEmail·findDept·회전/자르기)을 쓰지 않는다. 사진 손질 화면의 결과를 그대로 읽고 parseCard → reconcileOrg → 이메일 후보 칩만 적용.
+- 할 일: Paddle 원문(화면의 '원문' 칸)을 tests/cases.json 사례로 쌓고, 필요하면 일반 규칙을 보강한다.

@@ -1071,11 +1071,43 @@ if (typeof document !== 'undefined') {
     });
     return { x0, y0, x1, y1 };
   }
+  // PaddleOCR 한국어(PP-OCRv5): 사진은 폰 밖으로 나가지 않고, 모델·엔진 파일만 내려받는다(최초 1회 약 20MB). 실패하면 false → Tesseract
+  let paddleLoad = null;
+  function loadPaddle() {
+    if (window.PaddleKR) return Promise.resolve();
+    if (!paddleLoad) paddleLoad = new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'paddle-bundle.js'; s.onload = ok; s.onerror = () => { paddleLoad = null; no(new Error('엔진 로드 실패')); }; document.head.appendChild(s); });
+    return paddleLoad;
+  }
+  async function handlePaddle(src) {
+    try {
+      say('글자 인식 준비 중… (처음 한 번은 오래 걸립니다)'); el('barfill').style.width = '10%';
+      await loadPaddle();
+      await window.PaddleKR.init(m => say(m));
+      say('글자 읽는 중…'); el('barfill').style.width = '40%';
+      const k = Math.min(1, 1600 / Math.max(src.width, src.height));
+      const cv = document.createElement('canvas'); cv.width = Math.round(src.width * k); cv.height = Math.round(src.height * k);
+      cv.getContext('2d', { willReadFrequently: true }).drawImage(src, 0, 0, cv.width, cv.height);
+      const res = await window.PaddleKR.run(cv, m => say(m));
+      const text = (res.results || res.lines || []).map(x => x.text).filter(Boolean).join('\n') || res.text || '';
+      if (text.replace(/[^가-힣A-Za-z0-9]/g, '').length < 8) return false;
+      const r = parseCard(text);
+      if (/[가-힣]/.test((r.lname || '') + (r.fname || ''))) { try { r.org = reconcileOrg(r.org, r.email, r.web, text); } catch (e) {} } else if (!r.org && r.email) r.org = orgFromDomainEn(r.email);
+      try { el('preview').src = src.toDataURL('image/jpeg', 0.8); el('preview').style.display = 'block'; } catch (e) {}
+      el('raw').value = text;
+      IDS.forEach(k2 => { if (r[k2]) el(k2).value = r[k2]; });
+      try { showEmailAlts(r.email); } catch (e) {}
+      el('barfill').style.width = '100%';
+      say('완료! 이름·회사는 비슷한 글자로 잘못 읽힐 수 있으니 꼭 확인하세요.');
+      el('f').scrollIntoView({ behavior: 'smooth' });
+      return true;
+    } catch (e) { console.warn('Paddle 실패 → Tesseract', e); return false; }
+  }
   async function handle(srcIn) {
     if (!srcIn) return;
-    if (typeof Tesseract === 'undefined') { say('글자 인식 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요.'); return; }
     el('bar').style.display = 'block'; el('barfill').style.width = '3%';
     say('사진 준비 중…'); el('alts').innerHTML = ''; if (el('emalts')) el('emalts').innerHTML = '';
+    if (await handlePaddle(srcIn)) return;   // PaddleOCR(폰 안에서 처리)이 되면 끝, 실패하면 아래 Tesseract 방식으로
+    if (typeof Tesseract === 'undefined') { say('글자 인식 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요.'); return; }
     let worker;
     try {
       let src = srcIn;
