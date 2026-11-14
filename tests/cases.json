@@ -269,5 +269,12 @@
       "mobile": "010-9197-3502",
       "email": "kokuma10@naver.com"
     }
+  },
+  {
+    "name": "주소 번지·호수가 영문 줄과 다르게 읽힘(1-41/11-41, ?04추/#904)",
+    "ocr": "경기도 안양시 만안구 동안구 시민대로 327번길 1-41 안양창업지원센터 ?04추\n#904, Anyang Creative Economy Convergence Center, 11-41,\nkokuma10@naver.com",
+    "expect": {
+      "addr": "경기도 안양시 만안구 동안구 시민대로 327번길 11-41 안양창업지원센터 904호"
+    }
   }
 ]

@@ -226,7 +226,7 @@ function parseCard(text) {
       while (added < 2 && lines[k] && !used.has(k) && !isContact(lines[k]) && (/^\(.+\)$/.test(lines[k]) || (addrMore.test(lines[k]) && /[가-힣]/.test(lines[k])))) { a += ' ' + take(k); k++; added++; }
       // 앞에 붙은 아이콘 찌꺼기(©, ®, @ 등) 제거
       out.addr = a.replace(/^[^0-9가-힣A-Za-z(]+/, '').replace(/^(?:[A-Z]{2,}\s+)+(?=[가-힣])/, '').replace(/^[가-힣\s]{2,12}\s*[:：]\s*/, '').replace(/\s+/g, ' ').trim();
-      out.addr = cleanAddr(out.addr);
+      out.addr = crossAddr(cleanAddr(out.addr), text);
     }
   });
 
@@ -644,6 +644,39 @@ function mergeEmailVotes(textA, textB) {
   }
   if (!changed) return textB;
   return textB.replace(ub.slice(-n) + '@' + db, out + '@' + db);
+}
+// 이메일 0/o·1/l 후보: 헷갈리는 글자의 모든 조합을 만들어, 글자↔숫자 전환이 적고 숫자로 끝나는 것부터 보여 준다(현재 값 제외, 최대 6개)
+function emailAlts(email) {
+  const [u, d] = (email || '').split('@'); if (!d) return [];
+  const opts = { o: 'o0', O: 'o0', 0: 'o0', l: 'l1', I: 'l1', 1: 'l1' };
+  const pos = []; for (let i = 0; i < u.length; i++) if (u[i] in opts) pos.push(i);
+  if (!pos.length) return [];
+  const use = pos.slice(-8), res = [];
+  for (let m = 0; m < (1 << use.length); m++) {
+    const ch = u.split('');
+    use.forEach((p, j) => { ch[p] = opts[u[p]][(m >> j) & 1]; });
+    const v = ch.join('');
+    if (v === u) continue;
+    let sw = 0; for (let i = 1; i < v.length; i++) if (/\d/.test(v[i]) !== /\d/.test(v[i - 1]) && /[a-z0-9]/i.test(v[i]) && /[a-z0-9]/i.test(v[i - 1])) sw++;
+    const digits = (v.match(/\d/g) || []).length;
+    res.push({ v, score: sw * 10 - (/\d$/.test(v) ? 5 : 0) - digits });
+  }
+  res.sort((x, y) => x.score - y.score);
+  return res.slice(0, 6).map(x => x.v + '@' + d);
+}
+// 한글 주소의 번지·호수가 영문 주소 줄에도 있으면 그쪽으로 빠진 글자·깨진 글자를 맞춘다('1-41'↔'11-41', '?04호'↔'#904')
+function crossAddr(addr, text) {
+  let a = addr || ''; if (!a) return a;
+  a = a.replace(/(\d{1,4})-(\d{1,4})/g, (m, x, y) => {
+    const r = new RegExp('(?<![\\d-])(\\d{' + (x.length + 1) + ',5})-' + y + '(?![\\d-])', 'g'); let f;
+    const found = new Set(); while ((f = r.exec(text))) if (f[1].endsWith(x)) found.add(f[1]);
+    return found.size === 1 ? [...found][0] + '-' + y : m;
+  });
+  a = a.replace(/[^\d\s가-힣A-Za-z(](\d{2,3})\s?[추후흐호]$/, (m, n) => {
+    const h = [...(text || '').matchAll(/#\s?(\d{3,4})(?!\d)/g)].map(x => x[1]).filter(x => x.endsWith(n));
+    return ' ' + (h.length === 1 ? h[0] : n) + '호';
+  });
+  return a.replace(/\s+/g, ' ').trim();
 }
 /* ===== PARSER_END ===== */
 
@@ -1078,26 +1111,6 @@ if (typeof document !== 'undefined') {
     return best;
   }
   // 이메일 아이디의 헷갈리는 글자(o↔0, l↔1)를 숫자 옆에서만 바꾼 후보를 칩으로 보여 준다
-  function emailAlts(email) {
-    const [u, d] = (email || '').split('@'); if (!d) return [];
-    const out = new Set(), sw = { o: '0', O: '0', 0: 'o', l: '1', I: '1', 1: 'l' };
-    for (let i = 0; i < u.length; i++) {
-      const c = u[i]; if (!(c in sw)) continue;
-      const nb = (u[i - 1] || '') + (u[i + 1] || '');
-      if (/\d/.test(nb) || (c === '0' && /[a-z]/i.test(nb))) out.add(u.slice(0, i) + sw[c] + u.slice(i + 1) + '@' + d);
-    }
-    // 숫자 덩어리 바로 앞의 o·l은 숫자일 가능성이 높아 한꺼번에 바꾼 후보도 추가
-    const t = u.replace(/[oO](?=\d)/g, '0').replace(/[l](?=\d)/g, '1');
-    if (t !== u) out.add(t + '@' + d);
-    // 끝자리 l·I는 숫자 1일 가능성이 높아 가장 먼저 보여 준다(vinoo1 → vinool)
-    const first = [];
-    if (/[lI]$/.test(u)) first.push(u.slice(0, -1) + '1@' + d);
-    if (/[oO]$/.test(u)) first.push(u.slice(0, -1) + '0@' + d);
-    for (let i = 0; i < u.length; i++) if (/[lI1]/.test(u[i])) for (const r of 'l1I') if (r !== u[i]) out.add(u.slice(0, i) + r + u.slice(i + 1) + '@' + d);
-    out.delete(email);
-    const all = [...new Set([...first, ...out])].filter(x => x !== email);
-    return all.slice(0, 6);
-  }
   function showEmailAlts(email) {
     const box = el('emalts'); box.innerHTML = '';
     const a = emailAlts(email); if (!a.length) return;
