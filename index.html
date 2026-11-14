@@ -233,7 +233,8 @@ function parseCard(text) {
       parts.forEach(p => {
         const strongOrg = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|대학교?|그룹|\bInc\b|\bCorp\b|\bBank\b|\bGroup\b|\bCompany\b)/i.test(p);
         if (!out.title && titleRe.test(p) && !strongOrg && !deptRe.test(p)) out.title = p;
-        else if (!out.org && orgRe.test(p) && !deptRe.test(p)) out.org = p;
+        else if (!out.org && /연구소$/.test(p.trim()) && !/(팀|본부|사업부)/.test(p)) out.org = p.trim();
+        else if (!out.org && orgRe.test(p) && !deptRe.test(p) && !addrRe.test(p)) out.org = p;
         else if (!out.dept && deptRe.test(p) && !titleRe.test(p)) out.dept = p;
         else if (!out.title && titleRe.test(p)) out.title = p;
       });
@@ -243,7 +244,7 @@ function parseCard(text) {
   lines.forEach((l, i) => {
     if (used.has(i)) return;
     if (!out.title && titleRe.test(l) && l.length <= 20) { out.title = take(i); return; }
-    if (!out.org && orgRe.test(l)) { out.org = take(i); return; }
+    if (!out.org && orgRe.test(l) && !addrRe.test(l) && !/\d{2,}/.test(l)) { out.org = take(i); return; }
     if (!out.dept && deptRe.test(l) && l.length <= (/[가-힣]/.test(l) ? 20 : 40)) { out.dept = take(i); return; }
   });
 
