@@ -37,6 +37,10 @@
   #cbox { position:absolute; border:2px dashed #ffd23f; box-shadow:0 0 0 9999px rgba(0,0,0,.5); cursor:move; touch-action:none; }
   #cbox i { position:absolute; width:30px; height:30px; background:#ffd23f; border:2px solid #fff; border-radius:50%; touch-action:none; }
   #cbox i[data-h=nw]{left:-15px;top:-15px} #cbox i[data-h=ne]{right:-15px;top:-15px} #cbox i[data-h=sw]{left:-15px;bottom:-15px} #cbox i[data-h=se]{right:-15px;bottom:-15px}
+  .tilt { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:14px; color:var(--navy); font-weight:700; }
+  .tilt input { flex:1; }
+  .tilt b { min-width:44px; text-align:right; }
+  .tilt button { width:auto; margin:0; padding:8px 12px; font-size:13px; background:#e8edf7; color:var(--navy); }
   .edrow { display:flex; gap:8px; margin-top:10px; }
   .edrow button { margin:0; padding:11px 4px; font-size:14px; background:#e8edf7; color:var(--navy); }
   .status { margin-top:12px; font-size:13px; color:#5a6275; min-height:18px; }
@@ -69,6 +73,7 @@
     <div id="ed">
       <div class="edwrap" id="edwrap"><canvas id="edc"></canvas><div id="cbox"><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div></div>
       <div class="edrow"><button type="button" id="rotl">⟲ 왼쪽 돌리기</button><button type="button" id="rotr">⟳ 오른쪽 돌리기</button></div>
+      <div class="tilt"><span>기울기</span><input type="range" id="tilt" min="-15" max="15" step="0.5" value="0"><b id="tiltv">0°</b><button type="button" id="tiltauto">자동</button></div>
       <div class="edrow"><button type="button" id="autoc">✂ 자동 정리</button><button type="button" id="orig">↩ 원래대로</button></div>
       <button type="button" id="apply">✅ 적용 — 글자 읽기</button>
       <div class="hint">① 글자가 바로 보이게 돌리고 ② 노란 모서리를 끌어 명함만 남긴 뒤 ③ 적용을 누르세요. 긴 명함도 모서리를 직접 맞추면 됩니다. 정리할 필요가 없으면 바로 적용하세요.</div>
@@ -142,35 +147,41 @@ function parseCard(text) {
   // 이메일 / 웹
   lines.forEach((l, i) => {
     const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
-    const l2 = l.replace(/(@[A-Za-z0-9.-]*)\.\s+([A-Za-z]{2,})/g, '$1.$2');
+    const l2 = l.replace(/(@[A-Za-z0-9.-]*)\.\s+([A-Za-z]{2,})/g, '$1.$2').replace(/([A-Za-z0-9])\.\s+([A-Za-z0-9]+@)/g, '$1.$2');
     const m = l2.match(re) || l.replace(/\s/g, '').match(re);
-    if (m && !out.email) { out.email = m[0]; used.add(i); }
+    if (m && !out.email) { out.email = m[0].replace(/-(com|net|org|kr)$/i, '.$1'); used.add(i); }
   });
   lines.forEach((l, i) => {
-    if (used.has(i)) return;
-    const m = l.match(/(https?:\/\/\S+|www\.[A-Za-z0-9.\-\/]+)/i);
-    if (m && !out.web) { out.web = m[0]; used.add(i); }
+    if (out.web) return;
+    const x = l.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, ' ');
+    const m = x.match(/(https?:\/\/[^\s|]+|www\.[A-Za-z0-9.\-\/]+)/i) || x.match(/(?:^|[\s|])([A-Za-z0-9-]{3,}\.(?:com|co\.kr|net|org|io|kr))(?=$|[\s|])/i);
+    if (m) { out.web = (m[1] || m[0]).replace(/-(com|net|org|kr)$/i, '.$1'); if (!/@/.test(l)) used.add(i); }
   });
 
-  // 전화번호
-  const numRe = /(\+?82[-.\s]?)?\(?0\d{1,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}|\+82[-.\s]?\(?\d{1,4}\)?[-.\s]\d{3,4}[-.\s]\d{4}/;
+  // 전화번호 (한 줄에 T / F / M 이 함께 있어도 하나씩 나눠 읽는다)
+  const numG = /(\+?82[-.\s]?)?\(?0\d{1,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}|\+82[-.\s]?\(?\d{1,4}\)?[-.\s]\d{3,4}[-.\s]\d{4}/g;
   const fixNum = s => s.replace(/[Oo]/g, '0').replace(/[lI|]/g, '1');
   lines.forEach((l, i) => {
-    const m = fixNum(l).match(numRe);
-    if (!m) return;
-    let num = m[0].replace(/^\+?82[-.\s]?\(?0?/, '0').replace(/[()]/g, '').replace(/\s+/g, '-').replace(/\.+/g, '-');
-    if (out.tel) { const a = out.tel.split('-')[0]; if (a.length === 3 && num.split('-')[0].length === 4 && num.startsWith('0' + a[1] + a.slice(1))) num = a + num.slice(4); }
-    const head = l.slice(0, 12).toLowerCase();
-    const isFax = /(^|\s)f(ax)?\b|팩스/.test(head) || /^f[\s:.]/i.test(l);
-    const isMob = /(^|\s)m(obile)?\b|휴대|핸드폰|mobile|cell/.test(head) || /^01[016789]/.test(num.replace(/-/g, ''));
-    const isTel = /(^|\s)t(el)?\b|전화|직통/.test(head);
-    if (isFax) { if (!out.fax) out.fax = num; }
-    else if (isMob) { if (!out.mobile) out.mobile = num; }
-    else if (isTel || !out.tel) { if (!out.tel) out.tel = num; }
-    else if (!out.fax && /^0505|^0[2-6]\d?-?\d{3,4}-?\d{4}$/.test(num) && out.tel) { out.fax = num; }
-    const ex = l.match(/\[\s*(?:내선\s*)?(\d{2,5})\s*\]|내선\s*(\d{2,5})|ext\.?\s*(\d{2,5})/i);
-    if (ex && !out.ext) out.ext = ex[1] || ex[2] || ex[3];
-    used.add(i);
+    const fl = fixNum(l); let m, any = false; numG.lastIndex = 0;
+    while ((m = numG.exec(fl))) {
+      any = true;
+      let num = m[0].replace(/^\+?82[-.\s]?\(?0?/, '0').replace(/[()]/g, '').replace(/\s+/g, '-').replace(/\.+/g, '-');
+      if (out.tel) { const a = out.tel.split('-')[0]; if (a.length === 3 && num.split('-')[0].length === 4 && num.startsWith('0' + a[1] + a.slice(1))) num = a + num.slice(4); }
+      const before = fl.slice(Math.max(0, m.index - 10), m.index);
+      let lab = '';
+      const w = before.match(/(Tel|Fax|Mobile|Cell|Phone|전화|팩스|휴대폰?|핸드폰|직통)\s*[:.]?\s*$/i);
+      if (w) lab = /fax|팩스/i.test(w[1]) ? 'F' : /mobile|cell|휴대|핸드폰/i.test(w[1]) ? 'M' : 'T';
+      else { const c = before.match(/(?:^|[^A-Za-z])([TFMtfm£])\s*[:.]?\s*$/); if (c) lab = c[1] === '£' ? 'F' : c[1].toUpperCase(); }
+      const isMob = lab === 'M' || (!lab && /^01[016789]/.test(num.replace(/-/g, '')));
+      if (lab === 'F') { if (!out.fax) out.fax = num; }
+      else if (isMob) { if (!out.mobile) out.mobile = num; }
+      else if (lab === 'T') { if (!out.tel) out.tel = num; else if (!out.fax) out.fax = num; }
+      else if (!out.tel) out.tel = num;
+      else if (!out.fax && /^0505|^0[2-6]\d?-?\d{3,4}-?\d{4}$/.test(num)) out.fax = num;
+      const ex = l.match(/\[\s*(?:내선\s*)?(\d{2,5})\s*\]|내선\s*(\d{2,5})|ext\.?\s*(\d{2,5})/i);
+      if (ex && !out.ext) out.ext = ex[1] || ex[2] || ex[3];
+    }
+    if (any) used.add(i);
   });
 
   // 주소
@@ -205,7 +216,7 @@ function parseCard(text) {
   });
 
   // 직책 / 회사 / 부서
-  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석)/i;
+  const titleRe = /(대표|이사|사장|부사장|전무|상무|부장|차장|과장|대리|사원|팀장|본부장|실장|센터장|원장|교수|위원|지점장|지배인|CEO|CTO|CFO|Director|Manager|Engineer|President|Professor|Researcher|General|Senior|Chief|Head of|Officer|Executive|Vice|Associate|Deputy|Assistant|Specialist|Consultant|Advisor|Analyst|Supervisor|고문|컨설턴트|변호사|세무사|회계사|연구원|선임|책임|수석|파트너|변호사|변리사|법무사|노무사|감정평가사|Attorney|Partner|Counsel|Lawyer)/i;
   const orgRe = /(주식회사|\(주\)|㈜|은행|공사|공단|협회|협의회|재단|연구원|대학교?|센터|그룹|Inc\.?|Co\.?,?\s*Ltd|Corp|Bank|Group|Company)/i;
   const deptRe = /(본부|팀|부$|실$|지점|지사|과$|센터|사업부|영업|연구소|\bDept|Division|Team)/i;
   lines.forEach((l, i) => {
@@ -245,6 +256,7 @@ function parseCard(text) {
     if (m) { enLast = m[1]; enFirst = m[2]; used.add(i); return; }
     if (/^[A-Z][a-z]+(-[A-Za-z]+)?(\s[A-Z][a-z]+(-[A-Za-z]+)?){1,2}$/.test(t) || /^[A-Z]{2,}(-[A-Z]+)?(\s[A-Z]{2,}(-[A-Z]+)?){1,2}$/.test(t)) { nameLine = t; used.add(i); }
   });
+  if (/^[가-힣]{2}$/.test(nameLine)) { const cj = lines.find(x => /^([가-힣])\s+[A-Za-z]{2,}/.test(x)); if (cj) nameLine += cj[0]; }
   if (/[가-힣]/.test(nameLine)) { out.lname = nameLine.slice(0, 1); out.fname = nameLine.slice(1); }
   else if (enLast) { out.lname = enLast; out.fname = enFirst; }
   else if (nameLine) { const p = nameLine.split(' '); out.fname = p.slice(0, -1).join(' '); out.lname = p[p.length - 1]; }
@@ -257,11 +269,13 @@ function parseCard(text) {
   if (out.dept && !deptRe.test(out.dept)) out.dept = '';
   out.dept = cleanField(out.dept);
   if (out.title && !titleRe.test(out.title)) out.title = '';
+  if (out.title && /[가-힣]/.test(out.title)) { out.title = out.title.replace(/\s*[A-Za-z].*$/, '').trim() || out.title; const ft = fuzzyTitle(out.title); if (ft) out.title = ft; }
+  if (!out.org) { const lm = text.match(/법무법인\s*[가-힣]{2,6}/); if (lm) out.org = lm[0].replace(/\s+/g, ' '); }
   return out;
 }
 
 // 직책 단어(긴 것부터)와 '이름+직책' 분리: '황의상부장' → {name:'황의상', title:'부장'}
-const TITLE_WORDS = '대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
+const TITLE_WORDS = '파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
 function splitNameTitle(t) {
   const m = (t || '').match(new RegExp('^([가-힣]{2,4}?)(' + TITLE_WORDS + ')?$'));
   return m ? { name: m[1], title: m[2] || '' } : null;
@@ -294,10 +308,15 @@ function orgFromDomain(email) {
 // 이름 줄 판별: 한글 외 찌꺼기가 3자 이하이고 숫자 덩어리가 없으면, 한글만 뽑아 이름(+직책)으로 본다
 function looseName(l) {
   if (!l) return null;
-  const non = l.replace(/[가-힣\s]/g, '');
-  if (non.length > 3 || /\d{2}/.test(l)) return null;
-  const hangul = l.replace(/[^가-힣]/g, '');
+  if (/[가-힣]\s*[·.]\s*[가-힣]/.test(l)) return null;              // '수·오·재' 같은 로고 글자
+  let t = l;
+  const bi = l.match(/^[^가-힣A-Za-z]{0,3}((?:[가-힣]\s?){2,4})\s+[A-Za-z]{2,}/); // '박경란 Kyoungran Park'
+  if (bi) t = bi[1];
+  const non = t.replace(/[가-힣\s]/g, '');
+  if (non.length > 3 || /\d{2}/.test(t)) return null;
+  const hangul = t.replace(/[^가-힣]/g, '');
   if (hangul.length < 2 || hangul.length > 8) return null;
+  if (/(법무법인|주식회사|은행|공사|공단|협회|재단|대학|그룹|센터|본부|사무소|법률|특허)/.test(hangul)) return null;
   return splitNameTitle(hangul);
 }
 // 글자를 자모로 쪼개 비슷한 정도를 비교 (작은 글씨 '부장'이 '보장'으로 읽힌 경우 등)
@@ -324,16 +343,19 @@ function fuzzyTitle(raw) {
   if (t.length < 2 || t.length > 6) return '';
   let best = '', bd = 99;
   for (const w of TITLE_LIST) { const d = jamoDist(t, w); if (d < bd || (d === bd && w.length > best.length)) { bd = d; best = w; } }
-  return bd <= 1 ? best : '';
+  return bd <= (t.length >= 5 ? 2 : 1) ? best : '';
 }
 // 여러 번 읽은 줄들을 합친다. 신뢰도 낮은 줄·뜻 없는 찌꺼기 줄은 버리고, 앞 순서(정확한 방식)를 우선한다.
 // passes: [[{text, confidence}, ...], ...]
 function mergeLines(passes) {
   const norm = s => s.replace(/\s+/g, '').toLowerCase();
+  const score = ps => { let n = 0, d = 0; (ps || []).forEach(l => { const t = (l.text || '').trim(); if (t.length >= 3) { n += (l.confidence || 0) * t.length; d += t.length; } }); return d ? n / d : 0; };
+  const order = (passes || []).map((p, i) => ({ p, i, sc: score(p) })).sort((a, b) => b.sc - a.sc || a.i - b.i).map(x => x.p);
   const seen = [], out = [];
-  passes.forEach(pass => (pass || []).forEach(l => {
+  order.forEach(pass => (pass || []).forEach(l => {
     const t = (l.text || '').trim(); if (!t) return;
-    if ((l.confidence == null ? 100 : l.confidence) < 45) return;
+    const pat = /@|www\.|\.com|\d{2,4}[-.]\d{3,4}[-.]\d{4}/.test(t);
+    if ((l.confidence == null ? 100 : l.confidence) < (pat ? 30 : 45)) return;
     const hang = (t.match(/[가-힣]/g) || []).length, alnum = (t.match(/[A-Za-z0-9]/g) || []).length;
     if (!(hang >= 2 || alnum >= 6 || (hang >= 1 && alnum >= 3))) return;
     if (/Leader|Energy|Innovation|Slogan|KOGAS,/i.test(t)) return;
@@ -768,8 +790,51 @@ if (typeof document !== 'undefined') {
   // ---- 사진 손질 화면: 방향 돌리기 · 모서리 맞추기 → 적용을 눌러야 글자를 읽는다 ----
   let edOrig = null, edBase = null, edRot = 0, edCur = null;
   let box = { x: 0, y: 0, w: 1, h: 1 }; // 보이는 그림 기준 비율
+  let edFine = 0;
+  // 사진을 조금(±15°) 돌려 글자줄을 수평으로 맞춘다 (+는 시계 방향)
+  function rotateFine(src, deg) {
+    if (Math.abs(deg) < 0.05) return src;
+    const t = deg * Math.PI / 180, ca = Math.abs(Math.cos(t)), sa = Math.abs(Math.sin(t));
+    const W = src.width, H = src.height, c = document.createElement('canvas');
+    c.width = Math.round(W * ca + H * sa); c.height = Math.round(W * sa + H * ca);
+    const g = c.getContext('2d'), px = document.createElement('canvas'); px.width = px.height = 1;
+    const pg = px.getContext('2d'); pg.drawImage(src, 0, 0, 1, 1);
+    const d = pg.getImageData(0, 0, 1, 1).data; g.fillStyle = 'rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')'; g.fillRect(0, 0, c.width, c.height);
+    g.translate(c.width / 2, c.height / 2); g.rotate(t); g.drawImage(src, -W / 2, -H / 2);
+    return c;
+  }
+  // 글자줄 기울기 추정: 어두운 점들을 각도별로 가로줄에 모아 보고 줄이 가장 또렷해지는 각도를 고른다
+  function estimateSkew(src) {
+    const k = Math.min(1, 700 / Math.max(src.width, src.height));
+    const W = Math.max(8, Math.round(src.width * k)), H = Math.max(8, Math.round(src.height * k));
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'); g.drawImage(src, 0, 0, W, H);
+    const p = g.getImageData(0, 0, W, H).data, a = new Float32Array(W * H);
+    for (let i = 0, j = 0; i < a.length; i++, j += 4) a[i] = 0.299 * p[j] + 0.587 * p[j + 1] + 0.114 * p[j + 2];
+    const iw = W + 1, integ = new Float64Array(iw * (H + 1));
+    for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += a[y * W + x]; integ[(y + 1) * iw + x + 1] = integ[y * iw + x + 1] + row; } }
+    const s2 = Math.max(6, Math.round(W / 40)), xs = [], ys = [];
+    for (let y = 0; y < H; y++) {
+      const y0 = Math.max(0, y - s2), y1 = Math.min(H - 1, y + s2);
+      for (let x = 0; x < W; x++) {
+        const x0 = Math.max(0, x - s2), x1 = Math.min(W - 1, x + s2), cnt = (x1 - x0 + 1) * (y1 - y0 + 1);
+        const sum = integ[(y1 + 1) * iw + x1 + 1] - integ[y0 * iw + x1 + 1] - integ[(y1 + 1) * iw + x0] + integ[y0 * iw + x0];
+        if (a[y * W + x] < (sum / cnt) * 0.8) { xs.push(x); ys.push(y); }
+      }
+    }
+    if (xs.length < 200) return 0;
+    const step = Math.max(1, Math.floor(xs.length / 30000)), bins = Math.round(H * 1.5) + 2, off = W * 0.5;
+    const score = deg => {
+      const t = deg * Math.PI / 180, cs = Math.cos(t), sn = Math.sin(t), h = new Float64Array(bins);
+      for (let i = 0; i < xs.length; i += step) { const b = Math.floor((ys[i] * cs - xs[i] * sn + off) / (W * 0.5 + H * 1.2) * bins); if (b >= 0 && b < bins) h[b]++; }
+      let s = 0; for (let i = 0; i < bins; i++) s += h[i] * h[i]; return s;
+    };
+    const s0 = score(0); let best = 0, bs = s0;
+    for (let d = -15; d <= 15; d += 0.5) { const sc = score(d); if (sc > bs) { bs = sc; best = d; } }
+    return bs > s0 * 1.05 ? -best : 0;
+  }
   function edDraw() {
-    edCur = rotateCanvas(edBase, edRot);
+    edCur = rotateFine(rotateCanvas(edBase, edRot), edFine);
     const c = el('edc'); c.width = edCur.width; c.height = edCur.height;
     c.getContext('2d').drawImage(edCur, 0, 0);
     edBoxShow();
@@ -781,20 +846,41 @@ if (typeof document !== 'undefined') {
   function openEditor(file) {
     if (!file) return;
     loadCanvas(file).then(c => {
-      edOrig = c; edBase = c; edRot = 0; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 };
+      edOrig = c; edBase = c; edRot = 0; edFine = 0; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 };
       el('preview').style.display = 'none'; el('alts').innerHTML = '';
       el('ed').style.display = 'block'; edDraw();
-      say('방향을 맞추고 명함만 남게 모서리를 조정한 뒤 “적용”을 누르세요.');
+      if (!autoTilt()) say('방향을 맞추고 명함만 남게 모서리를 조정한 뒤 “적용”을 누르세요.');
       el('ed').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }).catch(e => say(e.message));
   }
-  el('rotl').addEventListener('click', () => { edRot = (edRot + 270) % 360; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); });
-  el('rotr').addEventListener('click', () => { edRot = (edRot + 90) % 360; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); });
-  el('orig').addEventListener('click', () => { edBase = edOrig; edRot = 0; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); });
+  function autoTilt() {
+    try {
+      const z = estimateSkew(rotateCanvas(edBase, edRot));
+      if (Math.abs(z) >= 1) { setTilt(z); say('글자 기울기를 자동으로 맞췄습니다(' + z.toFixed(1) + '°). 슬라이더로 다시 조정할 수 있어요. 방향·모서리를 확인하고 “적용”을 누르세요.'); return true; }
+    } catch (e) {}
+    return false;
+  }
+  function setTilt(v) { edFine = Math.max(-15, Math.min(15, v)); el('tilt').value = edFine; el('tiltv').textContent = edFine.toFixed(1).replace(/\.0$/, '') + '°'; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); }
+  let tiltRaf = 0;
+  el('tilt').addEventListener('input', () => {
+    edFine = parseFloat(el('tilt').value) || 0; el('tiltv').textContent = edFine.toFixed(1).replace(/\.0$/, '') + '°';
+    if (!tiltRaf) tiltRaf = requestAnimationFrame(() => { tiltRaf = 0; edDraw(); });
+  });
+  el('tiltauto').addEventListener('click', () => {
+    const r = Math.round(box.w * edCur.width), q = Math.round(box.h * edCur.height);
+    const cc = document.createElement('canvas'); cc.width = r; cc.height = q;
+    cc.getContext('2d').drawImage(edCur, Math.round(box.x * edCur.width), Math.round(box.y * edCur.height), r, q, 0, 0, r, q);
+    const z = estimateSkew(cc);
+    if (Math.abs(z) < 0.4) { say('추가로 맞출 기울기를 찾지 못했습니다. 슬라이더로 직접 맞춰 주세요.'); return; }
+    setTilt(edFine + z); say('기울기를 맞췄습니다. 모서리를 다시 확인한 뒤 “적용”을 누르세요.');
+  });
+  el('rotl').addEventListener('click', () => { edRot = (edRot + 270) % 360; edFine = 0; el('tilt').value = 0; el('tiltv').textContent = '0°'; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); autoTilt(); });
+  el('rotr').addEventListener('click', () => { edRot = (edRot + 90) % 360; edFine = 0; el('tilt').value = 0; el('tiltv').textContent = '0°'; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); autoTilt(); });
+  el('orig').addEventListener('click', () => { edBase = edOrig; edRot = 0; edFine = 0; el('tilt').value = 0; el('tiltv').textContent = '0°'; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw(); });
   el('autoc').addEventListener('click', () => {
     const r = cropCard(edCur);
     if (!r.cropped) { say('명함 테두리를 자동으로 찾지 못했습니다. 모서리를 직접 맞춰 주세요.'); return; }
-    edBase = r.canvas; edRot = 0; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw();
+    edBase = r.canvas; edRot = 0; edFine = 0; el('tilt').value = 0; el('tiltv').textContent = '0°'; box = { x: 0.02, y: 0.02, w: 0.96, h: 0.96 }; edDraw();
     say('자동으로 정리했습니다. 필요하면 모서리를 더 맞추고 “적용”을 누르세요.');
   });
   (function () {
