@@ -429,6 +429,7 @@ function cleanOrg(o) {
 function cleanAddr(a) {
   return (a || '')
     .replace(/^[A-Za-z0-9]{1,2}\s+(?=[가-힣])/, '')
+    .replace(/\s*(?:\b(?:TEL|FAX|Tel|Fax|tel|fax)\b|전화|팩스)\s*[.:]?\s*[\d()\-.\s]*.*$/, '')   // 같은 줄 뒤에 붙은 전화·팩스 표기는 주소가 아니다
     .replace(/\s[\^~|_`]+(?=\s|$)/g, ' ')
     .replace(/[\s^~|_`'"°•·,;:]+$/, '')
     .replace(/([가-힣])(로|길)(\d)/g, '$1$2 $3')
