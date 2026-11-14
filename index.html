@@ -96,7 +96,7 @@
     <label class="f" for="addr">주소</label><input type="text" id="addr">
 
     <button type="button" id="dl">연락처 파일(.vcf) 받기</button>
-    <button type="button" class="alt" id="share" hidden>공유로 바로 열기</button>
+    <button type="button" class="alt" id="share" hidden>연락처 앱으로 바로 보내기 (공유)</button>
     <button type="button" class="alt" id="reset">이 명함 담고 다음 명함 ▶</button>
     <button type="button" class="alt danger" id="discard">이 명함 지우기</button>
     <div id="queue" style="display:none"></div>
@@ -873,8 +873,18 @@ if (typeof document !== 'undefined') {
     if (navigator.canShare && navigator.canShare({ files: [t] })) {
       el('share').hidden = false;
       el('share').addEventListener('click', async () => {
-        try { await navigator.share({ files: [new File([buildVcf()], fileName(), { type: 'text/vcard' })] }); }
-        catch (e) { say('공유가 취소되었습니다.', 'msg'); }
+        if (!allCards().length) { say('이름을 입력해 주세요.', 'msg'); return; }
+        const body = buildVcf();
+        // 안드로이드 연락처 앱이 받는 형식(text/x-vcard)을 먼저, 안 되면 text/vcard
+        const files = ['text/x-vcard', 'text/vcard'].map(t => new File([body], fileName(), { type: t }))
+          .filter(f => !navigator.canShare || navigator.canShare({ files: [f] }));
+        if (!files.length) { say('이 브라우저는 파일 공유를 지원하지 않습니다. “연락처 파일(.vcf) 받기”를 이용하세요.', 'msg'); return; }
+        let lastErr = null;
+        for (const f of files) {
+          try { await navigator.share({ files: [f] }); say('공유 창에서 “연락처”를 고르면 바로 저장 화면이 열립니다.', 'msg'); return; }
+          catch (e) { if (e && e.name === 'AbortError') { say('공유가 취소되었습니다.', 'msg'); return; } lastErr = e; }
+        }
+        say('공유에 실패했습니다(' + (lastErr ? lastErr.name : '') + '). “연락처 파일(.vcf) 받기”를 이용하세요.', 'msg');
       });
     }
   } catch (e) {}
