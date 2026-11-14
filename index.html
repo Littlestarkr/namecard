@@ -311,7 +311,7 @@ function parseCard(text) {
   const isEn = !!enLast || (!!nameLine && !/[가-힣]/.test(nameLine));
 
   if (!out.org && out.email) out.org = isEn ? orgFromDomainEn(out.email) : orgFromDomain(out.email);
-  if (isEn && out.org && /[가-힣]/.test(out.org) && out.email) out.org = orgFromDomainEn(out.email) || out.org;
+  if (isEn && out.org && /[가-힣]/.test(out.org) && out.email && !/@(gmail|naver|hanmail|daum|nate|kakao|hotmail|outlook|yahoo|icloud)\./i.test(out.email)) out.org = orgFromDomainEn(out.email) || out.org;
   out.email = fixEmail(out.email);
   out.web = fixWeb(out.web, out.email);
   if (!isEn) out.org = reconcileOrg(out.org, out.email, out.web, text);
@@ -320,7 +320,7 @@ function parseCard(text) {
   if (out.dept && !deptRe.test(out.dept)) out.dept = '';
   out.dept = cleanField(out.dept);
   if (out.title && !titleRe.test(out.title)) out.title = '';
-  if (out.title && /[가-힣]/.test(out.title)) { out.title = out.title.replace(/\s*[A-Za-z].*$/, '').trim() || out.title; const ft = fuzzyTitle(out.title); if (ft) out.title = ft; }
+  if (out.title && /[가-힣]/.test(out.title)) { const tw = out.title.match(new RegExp(TITLE_WORDS)); if (tw) out.title = tw[0]; out.title = out.title.replace(/\s*[A-Za-z].*$/, '').trim() || out.title; const ft = fuzzyTitle(out.title); if (ft) out.title = ft; }
   if (!out.org) { const lm = text.match(/법무법인\s*[가-힣]{2,6}/); if (lm) out.org = lm[0].replace(/\s+/g, ' '); }
   return out;
 }
@@ -328,6 +328,8 @@ function parseCard(text) {
 // 직책 단어(긴 것부터)와 '이름+직책' 분리: '황의상부장' → {name:'황의상', title:'부장'}
 const TITLE_WORDS = '파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
 function splitNameTitle(t) {
+  const pm = (t || '').match(/^(대표이사|대표|부회장|회장|부사장|사장)([가-힣]{2,4})$/);   // '대표김시균', '대표잘과'
+  if (pm) return { name: pm[2], title: pm[1] };
   const m = (t || '').match(new RegExp('^([가-힣]{2,4}?)(' + TITLE_WORDS + ')?$'));
   if (m && !(m[2] === undefined && new RegExp('^(' + TITLE_WORDS + ')$').test(m[1]))) return { name: m[1], title: m[2] || '' };
   const m2 = (t || '').match(new RegExp('^(' + TITLE_WORDS + ')([가-힣]{2,4})$'));      // '대표김시균'
@@ -389,7 +391,8 @@ function orgFromText(t) { for (const [re, v] of ORG_TEXT) if (re.test(t || '')) 
 // 이름 줄 판별: 한글 외 찌꺼기가 3자 이하이고 숫자 덩어리가 없으면, 한글만 뽑아 이름(+직책)으로 본다
 function looseName(l) {
   if (!l) return null;
-  if (/[가-힣]\s*[·.|ㅣ]\s*[가-힣]/.test(l)) return null;              // '수·오·재' 같은 로고 글자
+  if (/[&@]/.test(l)) return null;                                      // '주남&금강 FR' 같은 로고 줄
+  if (/(^|\s)[가-힣]\s*[·.|ㅣ]\s*[가-힣](?=\s|$|[·.|ㅣ])/.test(l)) return null;   // '수·오·재' 같은 낱글자 로고
   let t = l;
   const bi = l.match(/^[^가-힣A-Za-z]{0,3}((?:[가-힣]\s?){2,4})\s+[A-Za-z]{2,}/); // '박경란 Kyoungran Park'
   if (bi) t = bi[1];
@@ -788,7 +791,14 @@ if (typeof document !== 'undefined') {
     if (current) votes[current] = 1;
     if (cands.length) {
       cands.sort((x, y) => ((y.bbox.y1 - y.bbox.y0) * (y.confidence || 1)) - ((x.bbox.y1 - x.bbox.y0) * (x.confidence || 1)));
-      const top = cands[0], b = top.bbox, h = Math.max(1, b.y1 - b.y0), pad = Math.round(h * 0.15);
+      const top = cands[0], h = Math.max(1, top.bbox.y1 - top.bbox.y0), pad = Math.round(h * 0.15);
+      // 줄 맨 앞이 '대표' 같은 직책 단어면 그 오른쪽(이름 글자)만 잘라서 다시 읽는다
+      const b = { x0: top.bbox.x0, x1: top.bbox.x1, y0: top.bbox.y0, y1: top.bbox.y1 };
+      try {
+        const tre = new RegExp('^(' + TITLE_WORDS + ')$');
+        const fw = (top.words || []).find(w => tre.test((w.text || '').replace(/[^가-힣]/g, '')));
+        if (fw && fw.bbox.x1 < b.x1 - h) b.x0 = fw.bbox.x1;
+      } catch (e) {}
       const first = nt(top.text); votes[first.name] = (votes[first.name] || 0) + 1; title = first.title || '';
       const sx = Math.max(0, b.x0 - pad), sy = Math.max(0, b.y0 - pad);
       const sw = Math.min(src.width - sx, b.x1 - b.x0 + pad * 2 + Math.max(h * 4, (b.x1 - b.x0) * 0.8)), sh = Math.min(src.height - sy, h + pad * 2);
@@ -953,7 +963,7 @@ if (typeof document !== 'undefined') {
         if (pass === 3 && mergeLines(passes).split('\n').length >= 7) break; // 반전 읽기는 글자가 거의 안 읽힐 때만
         await worker.setParameters({ tessedit_pageseg_mode: modes[pass][1] });
         const res = await worker.recognize(await variant(src, modes[pass][0]));
-        const ls = (res.data.lines || []).map(l => ({ text: l.text, confidence: l.confidence, bbox: l.bbox }));
+        const ls = (res.data.lines || []).map(l => ({ text: l.text, confidence: l.confidence, bbox: l.bbox, words: (l.words || []).map(w => ({ text: w.text, bbox: w.bbox })) }));
         ls.prio = modes[pass][1] === '6' ? 1 : 0;
         passes.push(ls); ls.forEach(l => lines.push(l));
       }
