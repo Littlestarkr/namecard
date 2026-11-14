@@ -199,7 +199,7 @@ function parseCard(text) {
     const tRe = new RegExp('(' + TITLE_WORDS + ')');
     const tIdx = parts.findIndex(p => tRe.test(p));
     if (tIdx < 0) return;
-    if (!out.title) out.title = parts[tIdx].match(tRe)[1];
+    if (!out.title) out.title = parts[tIdx].replace(/[^가-힣\s]/g, '').replace(/\s+/g, ' ').trim();
     parts.forEach((p, k) => {
       if (k === tIdx) return;
       const h = p.replace(/[^가-힣\s]/g, '').replace(/\s+/g, ' ').trim();
@@ -238,7 +238,7 @@ function parseCard(text) {
   // 이름+직책이 한 줄에 붙은 경우('황의상 부장')
   lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
-    if (new RegExp('^(' + TITLE_WORDS + ')+$').test(l.replace(/[^가-힣]/g, ''))) return;   // 직책 단어뿐인 줄은 이름이 아님
+    if (isTitleLike(l)) return;   // 직책 단어(오인식 포함)뿐인 줄은 이름이 아님
     const nt = looseName(l);
     if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
   });
@@ -293,7 +293,7 @@ function parseCard(text) {
   // 이름: 한글 2~4자 단독 줄 → 영문 2~3단어 줄
   lines.forEach((l, i) => {
     if (used.has(i) || nameLine) return;
-    if (new RegExp('^(' + TITLE_WORDS + ')+$').test(l.replace(/[^가-힣]/g, ''))) return;   // 직책 단어뿐인 줄은 이름이 아님
+    if (isTitleLike(l)) return;   // 직책 단어(오인식 포함)뿐인 줄은 이름이 아님
     const nt = looseName(l);
     if (nt && !nt.title) { nameLine = nt.name; used.add(i); }
     else if (nt && nt.title) { nameLine = nt.name; if (!out.title) out.title = nt.title; used.add(i); }
@@ -318,13 +318,14 @@ function parseCard(text) {
   if (isEn && out.org && /[가-힣]/.test(out.org) && out.email && !/@(gmail|naver|hanmail|daum|nate|kakao|hotmail|outlook|yahoo|icloud)\./i.test(out.email)) out.org = orgFromDomainEn(out.email) || out.org;
   out.email = fixEmail(out.email);
   out.web = fixWeb(out.web, out.email);
+  out.org = cleanOrg(out.org);
   if (!isEn) out.org = reconcileOrg(out.org, out.email, out.web, text);
   out.org = fixOrg(out.org);
   const cleanField = v => { if (!v) return ''; if (!/[가-힣]/.test(v)) return v.split(/\s+/).every(w => /^([A-Z][a-z]{2,}|[A-Z]{2,5}|&|of|and|the|[A-Z][a-z]+-[A-Z]?[a-z]+)$/.test(w)) ? v : ''; const h = (v.match(/[가-힣]/g) || []).length, e = (v.match(/[A-Za-z]/g) || []).length, o = (v.match(/[^가-힣A-Za-z0-9\s&().-]/g) || []).length; return (h >= 2 && e <= h && o <= 1) ? v : ''; };
   if (out.dept && !deptRe.test(out.dept)) out.dept = '';
   out.dept = cleanField(out.dept);
   if (out.title && !titleRe.test(out.title)) out.title = '';
-  if (out.title && /[가-힣]/.test(out.title)) { const tw = out.title.match(new RegExp(TITLE_WORDS)); if (tw) out.title = tw[0]; out.title = out.title.replace(/\s*[A-Za-z].*$/, '').trim() || out.title; const ft = fuzzyTitle(out.title); if (ft) out.title = ft; }
+  if (out.title && /[가-힣]/.test(out.title)) { out.title = keepTitles(out.title); }
   if (!out.org) { const lm = text.match(/법무법인\s*[가-힣]{2,6}/); if (lm) out.org = lm[0].replace(/\s+/g, ' '); }
   return out;
 }
@@ -333,8 +334,8 @@ function parseCard(text) {
 const TITLE_WORDS = '경영지도사|기술지도사|관세사|파트너변호사|대표변호사|수석변호사|소속변호사|공인회계사|공인노무사|감정평가사|변호사|변리사|세무사|법무사|노무사|건축사|파트너|대표이사|부사장|부회장|본부장|센터장|지점장|연구원|컨설턴트|관리사|부장|차장|과장|대리|사원|팀장|실장|원장|교수|위원|이사|사장|전무|상무|대표|고문|회장|국장|처장|소장|선임|책임|수석|주임';
 function splitNameTitle(t) {
   const pm = (t || '').match(/^(대표이사|대표|부회장|회장|부사장|사장)([가-힣]{2,4})$/);   // '대표김시균', '대표잘과'
-  if (pm) return { name: pm[2], title: pm[1] };
-  const m = (t || '').match(new RegExp('^([가-힣]{2,4}?)(' + TITLE_WORDS + ')?$'));
+  if (pm) return (pm[2].length >= 3 && isTitleLike(pm[2])) ? null : { name: pm[2], title: pm[1] };   // '대표커설턴트'는 이름이 아님
+  const m = (t || '').match(new RegExp('^([가-힣]{2,4}?)((?:' + TITLE_WORDS + ')+)?$'));
   if (m && !(m[2] === undefined && new RegExp('^(' + TITLE_WORDS + ')$').test(m[1]))) return { name: m[1], title: m[2] || '' };
   const m2 = (t || '').match(new RegExp('^(' + TITLE_WORDS + ')([가-힣]{2,4})$'));      // '대표김시균'
   return m2 ? { name: m2[2], title: m2[1] } : null;
@@ -381,6 +382,32 @@ function reconcileOrg(org, email, web, text) {
 }
 // 이메일 보정: 'orkr'→'or.kr' 같은 점 빠짐, 알려진 기관 도메인과 한 글자 차이면 맞춰 줌
 // 주소 찌꺼기 정리: 위치 아이콘이 'O'로, 가장자리 선이 '^' 등으로 읽힌 것을 지우고 '로/길' 뒤 번지 앞에 공백을 넣는다
+// 직책 글자열에서 직책 단어를 모두 살려 ' '로 잇는다('대표 컨설턴트'). 오인식은 가까운 직책 단어로 맞추고, 하나도 못 찾으면 첫 일치 단어(없으면 원문)를 쓴다.
+function keepTitles(raw) {
+  const base = (raw || '').replace(/\s*[A-Za-z].*$/, '').trim();
+  const pure = new RegExp('^(?:' + TITLE_WORDS + ')+$');
+  const toks = base.split(/[\s\/|·,]+/).map(t => t.replace(/[^가-힣]/g, '')).filter(Boolean)
+    .map(t => pure.test(t) ? t : (t.length >= 2 ? fuzzyTitle(t) : '')).filter(Boolean)
+    .flatMap(t => pure.test(t) ? (t.match(new RegExp(TITLE_WORDS, 'g')) || [t]) : [t]);   // '대표컨설턴트' → 대표, 컨설턴트
+  if (toks.length) return [...new Set(toks)].join(' ');
+  const tw = base.match(new RegExp(TITLE_WORDS));
+  return tw ? tw[0] : (base || raw);
+}
+// 직책 단어(또는 오인식된 직책 단어)로만 이뤄진 줄인가? 이름 후보에서 빼는 데 쓴다.
+function isTitleLike(l) {
+  const pure = new RegExp('^(?:' + TITLE_WORDS + ')+$');
+  if (pure.test((l || '').replace(/[^가-힣]/g, ''))) return true;
+  const toks = (l || '').split(/[\s\/|·,]+/).map(t => t.replace(/[^가-힣]/g, '')).filter(Boolean);
+  return toks.length > 0 && toks.every(t => pure.test(t) || (t.length >= 3 && !!fuzzyTitle(t)));
+}
+// 회사명 가장자리 찌꺼기 제거: '` … 케이스퀘어 파트너스 _럴' → '케이스퀘어 파트너스'
+function cleanOrg(o) {
+  return (o || '')
+    .replace(/\s*[_|~^`]+\s*\S{0,2}$/, '')
+    .replace(/^[^가-힣A-Za-z0-9(㈜]+/, '')
+    .replace(/[\s^~|_`'"°•·,;:…]+$/, '')
+    .replace(/\s+/g, ' ').trim();
+}
 function cleanAddr(a) {
   return (a || '')
     .replace(/^[A-Za-z0-9]{1,2}\s+(?=[가-힣])/, '')
@@ -412,7 +439,7 @@ function looseName(l) {
   const non = t.replace(/[가-힣\s]/g, '');
   if (non.length > 3 || /\d{2}/.test(t)) return null;
   const hangul = t.replace(/[^가-힣]/g, '');
-  if (hangul.length < 2 || hangul.length > 8) return null;
+  if (hangul.length < 2 || hangul.length > 12) return null;
   if (/^쥐/.test(hangul)) return null;                                // (주)가 '쥐'로 읽힌 로고
   if (/(법무법인|주식회사|은행|공사|공단|협회|재단|대학|그룹|센터|본부|사무소|법률|특허)/.test(hangul)) return null;
   return splitNameTitle(hangul);
