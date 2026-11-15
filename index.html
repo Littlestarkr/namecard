@@ -771,12 +771,12 @@ if (typeof document !== 'undefined') {
     if (c.org || c.dept) L.push('ORG:' + esc(c.org) + ';' + esc(c.dept));
     if (c.title) L.push('TITLE:' + esc(c.title));
     if (c.mobile) L.push('TEL;TYPE=CELL:' + c.mobile);
-    if (c.tel) L.push('TEL;TYPE=WORK,VOICE:' + c.tel);
+    if (c.tel) L.push('TEL;TYPE=WORK,VOICE:' + c.tel + (c.ext ? ',' + c.ext.replace(/[^0-9*#]/g, '') : ''));
     if (c.fax) L.push('TEL;TYPE=WORK,FAX:' + c.fax);
     if (c.email) L.push('EMAIL;TYPE=WORK:' + c.email);
     if (c.web) L.push('URL:' + c.web);
     if (c.addr) L.push('ADR;TYPE=WORK:;;' + esc(c.addr) + ';;;;');
-    { const n = [c.ext ? '내선 ' + c.ext : '', c.memo || ''].filter(Boolean).join('\n'); if (n) L.push('NOTE:' + esc(n)); }
+    if (c.memo) L.push('NOTE:' + esc(c.memo));
     L.push('END:VCARD');
     return L.join('\r\n') + '\r\n';
   }
