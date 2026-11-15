@@ -107,6 +107,7 @@
     <div id="emalts" style="margin-top:2px;font-size:13px;color:#5a6275"></div>
     <label class="f" for="web">웹사이트</label><input type="text" id="web">
     <label class="f" for="addr">주소</label><input type="text" id="addr">
+    <label class="f" for="memo">메모 (직접 입력)</label><textarea id="memo" rows="2" placeholder="만난 곳·날짜, 특이사항 등" style="width:100%;font:inherit;padding:12px 14px;border:1.5px solid #dde1ea;border-radius:14px;background:#fafbfd;resize:vertical;box-sizing:border-box"></textarea>
 
     <button type="button" id="dl">연락처 파일(.vcf) 받기</button>
     <button type="button" class="alt" id="reset">이 명함 담고 다음 명함 ▶</button>
@@ -755,7 +756,7 @@ if (typeof document !== 'undefined') {
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('namecard-sw.js', { scope: './' }).catch(() => {});
   }
-  const IDS = ['lname','fname','org','dept','title','mobile','tel','ext','fax','email','web','addr'];
+  const IDS = ['lname','fname','org','dept','title','mobile','tel','ext','fax','email','web','addr','memo'];
   const el = id => document.getElementById(id);
   const val = id => el(id).value.trim();
   const esc = s => s.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/;/g,'\\;').replace(/,/g,'\\,');
@@ -775,7 +776,7 @@ if (typeof document !== 'undefined') {
     if (c.email) L.push('EMAIL;TYPE=WORK:' + c.email);
     if (c.web) L.push('URL:' + c.web);
     if (c.addr) L.push('ADR;TYPE=WORK:;;' + esc(c.addr) + ';;;;');
-    if (c.ext) L.push('NOTE:' + esc('내선 ' + c.ext));
+    { const n = [c.ext ? '내선 ' + c.ext : '', c.memo || ''].filter(Boolean).join('\n'); if (n) L.push('NOTE:' + esc(n)); }
     L.push('END:VCARD');
     return L.join('\r\n') + '\r\n';
   }
