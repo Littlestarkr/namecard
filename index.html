@@ -60,6 +60,8 @@
   #queue > .mini { margin-top:10px; }
   button.danger { background:#fdecec; color:#b3261e; }
   .chip { display:inline-block; margin:4px 6px 0 0; padding:6px 12px; border-radius:16px; border:1px solid var(--line); background:#eef2fa; color:var(--navy); font-size:15px; font-weight:700; cursor:pointer; width:auto; }
+  #f.collapsed > :not(#ftoggle) { display:none; }
+  #f:not(.collapsed) #ftoggle { margin-bottom:6px; }
   .help { font-size:13px; color:#4a5266; line-height:1.65; }
 </style>
 </head>
@@ -88,7 +90,8 @@
     <div class="hint">처음 한 번은 한글 인식 데이터(약 수 MB)를 내려받아 시간이 걸립니다. 사진은 서버로 전송되지 않고 폰 안에서만 처리됩니다.</div>
   </div>
 
-  <form class="card" id="f" autocomplete="off" onsubmit="return false">
+  <form class="card collapsed" id="f" autocomplete="off" onsubmit="return false">
+    <button type="button" class="alt" id="ftoggle">▼ 입력란 펼치기</button>
     <div class="row">
       <div><label class="f" for="lname" style="margin-top:0">성</label><input type="text" id="lname"></div>
       <div><label class="f" for="fname" style="margin-top:0">이름</label><input type="text" id="fname"></div>
@@ -761,6 +764,8 @@ if (typeof document !== 'undefined') {
   const val = id => el(id).value.trim();
   const esc = s => s.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/;/g,'\\;').replace(/,/g,'\\,');
   const say = (t, id='status') => { el(id).textContent = t; };
+  const setForm = open => { const f = document.getElementById('f'); f.classList.toggle('collapsed', !open); document.getElementById('ftoggle').textContent = open ? '▲ 입력란 접기' : '▼ 입력란 펼치기'; };
+  document.getElementById('ftoggle').addEventListener('click', () => setForm(document.getElementById('f').classList.contains('collapsed')));
 
   const getCard = () => { const c = {}; IDS.forEach(k => c[k] = val(k)); return c; };
   const hasName = c => !!(c.lname || c.fname);
@@ -797,14 +802,14 @@ if (typeof document !== 'undefined') {
     const box = el('queue'), n = allCards().length;
     el('dl').textContent = '연락처 파일(.vcf) 받기' + (n > 1 ? ' (' + n + '명)' : '');
     if (!queue.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
-    box.style.display = 'block'; box.innerHTML = '';
+    box.style.display = 'block'; box.innerHTML = ''; setForm(true);
     const h = document.createElement('div'); h.className = 'qh'; h.textContent = '담아 둔 명함 ' + queue.length + '명';
     box.appendChild(h);
     queue.forEach((c, i) => {
       const row = document.createElement('div'); row.className = 'qrow';
       const t = document.createElement('span'); t.textContent = (c.lname + c.fname) + (c.org ? ' · ' + c.org : '');
       const e = document.createElement('button'); e.type = 'button'; e.className = 'mini'; e.textContent = '수정';
-      e.addEventListener('click', () => { IDS.forEach(k => el(k).value = c[k] || ''); queue.splice(i, 1); saveQueue(); renderQueue(); el('f').scrollIntoView({ behavior: 'smooth' }); say('수정 후 다시 담거나 바로 받으세요.', 'msg'); });
+      e.addEventListener('click', () => { IDS.forEach(k => el(k).value = c[k] || ''); queue.splice(i, 1); saveQueue(); renderQueue(); setForm(true); el('f').scrollIntoView({ behavior: 'smooth' }); say('수정 후 다시 담거나 바로 받으세요.', 'msg'); });
       const d = document.createElement('button'); d.type = 'button'; d.className = 'mini'; d.textContent = '삭제';
       d.addEventListener('click', () => { queue.splice(i, 1); saveQueue(); renderQueue(); });
       row.append(t, e, d); box.appendChild(row);
@@ -1228,7 +1233,7 @@ if (typeof document !== 'undefined') {
       try { showEmailAlts(r.email); } catch (e) {}
       el('barfill').style.width = '100%';
       say('완료! (' + ((performance.now() - t0) / 1000).toFixed(1) + '초) 이름·회사는 비슷한 글자로 잘못 읽힐 수 있으니 꼭 확인하세요.');
-      el('f').scrollIntoView({ behavior: 'smooth' });
+      setForm(true); el('f').scrollIntoView({ behavior: 'smooth' });
       return true;
     } catch (e) { console.warn('Paddle 실패 → Tesseract', e); return false; }
   }
@@ -1319,7 +1324,7 @@ if (typeof document !== 'undefined') {
       try { showEmailAlts(r.email); } catch (e) {}
       el('barfill').style.width = '100%';
       say('완료! 이름·회사는 비슷한 글자로 잘못 읽힐 수 있으니 꼭 확인하세요.');
-      el('f').scrollIntoView({ behavior: 'smooth' });
+      setForm(true); el('f').scrollIntoView({ behavior: 'smooth' });
     } catch (e) { say('인식에 실패했습니다: ' + e.message); }
     finally { curLog = () => {}; idleStop(); }
   }
